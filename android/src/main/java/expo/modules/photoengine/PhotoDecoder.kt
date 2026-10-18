@@ -7,6 +7,7 @@ import android.graphics.ColorSpace
 import android.graphics.Matrix
 import android.media.ExifInterface
 import android.net.Uri
+import android.os.Build
 import java.io.File
 import java.io.FileInputStream
 import java.io.InputStream
@@ -65,7 +66,9 @@ internal object PhotoDecoder {
       inSampleSize = sample
       inPreferredConfig = Bitmap.Config.ARGB_8888
       // Convert Display P3 / Adobe RGB sources into sRGB, the same working space as iOS.
-      inPreferredColorSpace = ColorSpace.get(ColorSpace.Named.SRGB)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        inPreferredColorSpace = ColorSpace.get(ColorSpace.Named.SRGB)
+      }
     }
     val decoded = open(context, source).use { BitmapFactory.decodeStream(it, null, options) }
       ?: throw IllegalArgumentException("Could not decode image: $source")
