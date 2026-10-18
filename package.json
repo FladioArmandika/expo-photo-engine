@@ -1,0 +1,82 @@
+{
+  "name": "@fladioarmandika/expo-photo-engine",
+  "version": "0.0.1",
+  "description": "A native photo-editing engine for Expo. Your UI, our GPU.",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "scripts": {
+    "build": "node internal/module_scripts/build.js",
+    "clean": "node internal/module_scripts/clean.js",
+    "lint": "eslint src/",
+    "test": "node internal/module_scripts/test.js",
+    "prepare": "node internal/module_scripts/prepare.js",
+    "open:ios": "node internal/module_scripts/open-ios.js",
+    "open:android": "node internal/module_scripts/open-android.js",
+    "typecheck": "tsc --noEmit",
+    "compare-images": "node scripts/compare-images.mjs"
+  },
+  "keywords": [
+    "react-native",
+    "expo",
+    "photo-editor",
+    "image-editor",
+    "image-filters",
+    "metal",
+    "opengl",
+    "gpu",
+    "lut",
+    "non-destructive"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FladioArmandika/expo-photo-engine.git"
+  },
+  "bugs": {
+    "url": "https://github.com/FladioArmandika/expo-photo-engine/issues"
+  },
+  "author": "Fladio Armandika (https://github.com/FladioArmandika)",
+  "license": "MIT",
+  "homepage": "https://github.com/FladioArmandika/expo-photo-engine#readme",
+  "devDependencies": {
+    "@babel/core": "^7.26.0",
+    "@react-native/jest-preset": "0.88.0",
+    "@types/jest": "^30.0.0",
+    "@types/react": "~19.3.0",
+    "babel-preset-expo": "~58.0.15",
+    "eslint": "~9.39.4",
+    "eslint-config-universe": "^16.1.2",
+    "expo": "^58.0.11",
+    "jest": "^30.0.0",
+    "jest-expo": "~58.0.11",
+    "pngjs": "^7.0.0",
+    "prettier": "^3.0.0",
+    "react": "19.3.0",
+    "react-native": "0.88.0",
+    "typescript": "~6.0.3"
+  },
+  "jest": {
+    "preset": "jest-expo",
+    "roots": [
+      "<rootDir>/src"
+    ]
+  },
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "build",
+    "src",
+    "ios",
+    "android/build.gradle",
+    "android/src",
+    "expo-module.config.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "react-native": "src/index.ts"
+}

@@ -1,0 +1,73 @@
+package expo.modules.photoengine
+
+import expo.modules.kotlin.exception.Exceptions
+import expo.modules.kotlin.modules.Module
+import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.kotlin.records.Field
+import expo.modules.kotlin.records.Record
+
+class EditStackRecord : Record {
+  @Field val version: Int = 1
+  @Field val adjustments: Map<String, Double> = emptyMap()
+}
+
+class ExportOptionsRecord : Record {
+  @Field val format: String = "png"
+  @Field val quality: Double = 0.92
+  @Field val maxDimension: Int = 0
+}
+
+internal fun EditStackRecord.toShaderParams() =
+  ShaderParams(exposure = (adjustments["exposure"] ?: 0.0).toFloat())
+
+class ExpoPhotoEngineModule : Module() {
+  override fun definition() = ModuleDefinition {
+    Name("ExpoPhotoEngine")
+
+    // Runs on Expo's background queue, never on the JS or main thread.
+    AsyncFunction("exportImageAsync") { source: String, edits: EditStackRecord, options: ExportOptionsRecord ->
+      val context = appContext.reactContext ?: throw Exceptions.ReactContextLost()
+      PhotoExporter.export(
+        context, source, edits.toShaderParams(),
+        options.format, options.quality, options.maxDimension
+      )
+    }
+
+    View(PhotoCanvasView::class) {
+      Events("onLoad", "onError", "onRenderStats")
+
+      Prop("source") { view: PhotoCanvasView, source: String? ->
+        view.setSource(source)
+      }
+
+      Prop("previewQuality") { view: PhotoCanvasView, quality: String? ->
+        view.setPreviewQuality(quality)
+      }
+
+      Prop("edits") { view: PhotoCanvasView, edits: EditStackRecord? ->
+        if (edits != null) view.setEdits(edits)
+      }
+
+      // Ref methods.
+      AsyncFunction("setAdjustment") { view: PhotoCanvasView, key: String, value: Double ->
+        view.setAdjustment(key, value)
+      }
+
+      AsyncFunction("setEdits") { view: PhotoCanvasView, edits: EditStackRecord ->
+        view.setEdits(edits)
+      }
+
+      AsyncFunction("beginInteraction") { view: PhotoCanvasView ->
+        view.beginInteraction()
+      }
+
+      AsyncFunction("endInteraction") { view: PhotoCanvasView ->
+        view.endInteraction()
+      }
+
+      OnViewDestroys { view: PhotoCanvasView ->
+        view.release()
+      }
+    }
+  }
+}

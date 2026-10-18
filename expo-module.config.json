@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["ExpoPhotoEngineModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.photoengine.ExpoPhotoEngineModule"]
+  }
+}
