@@ -1,10 +1,16 @@
 import {
   ADJUSTMENT_KEYS,
   ADJUSTMENTS,
+  createCrop,
   exportImage,
+  flipHorizontal,
   PhotoCanvas,
+  rotateRight,
   usePhotoEditor,
+  withCrop,
+  withStraighten,
   type AdjustmentKey,
+  type EditStack,
   type ExportResult,
   type LoadEvent,
   type PreviewQuality,
@@ -22,7 +28,8 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-n
 // straight to the canvas, so dragging never causes a React render, and makes each drag one undo step.
 export default function App() {
   const editor = usePhotoEditor();
-  const [active, setActive] = useState<AdjustmentKey>('exposure');
+  // One slider at a time: an adjustment, or the straighten angle.
+  const [active, setActive] = useState<AdjustmentKey | 'straighten'>('exposure');
   const [source, setSource] = useState<string | null>(null);
   const [quality, setQuality] = useState<PreviewQuality>('auto');
   const [load, setLoad] = useState<LoadEvent | null>(null);
@@ -36,11 +43,13 @@ export default function App() {
     if (!sweeping) return;
     const { controller } = editor;
     controller.beginGesture();
-    const { min, max } = ADJUSTMENTS[active];
+    const { min, max } = active === 'straighten' ? { min: -20, max: 20 } : ADJUSTMENTS[active];
     const start = performance.now();
     let frame = requestAnimationFrame(function tick(now) {
       const t = (Math.sin((now - start) / 600) + 1) / 2;
-      controller.setAdjustment(active, min + (max - min) * (min < 0 ? 0.15 + t * 0.7 : t));
+      const value = min + (max - min) * (min < 0 ? 0.15 + t * 0.7 : t);
+      if (active === 'straighten') controller.update((s) => withStraighten(s, value));
+      else controller.setAdjustment(active, value);
       frame = requestAnimationFrame(tick);
     });
     return () => {
@@ -141,8 +150,36 @@ export default function App() {
             <Text style={styles.chipText}>{ADJUSTMENTS[key].label}</Text>
           </Pressable>
         ))}
+        <Pressable
+          style={[styles.chip, active === 'straighten' && styles.chipActive]}
+          onPress={() => setActive('straighten')}>
+          <Text style={styles.chipText}>Straighten</Text>
+        </Pressable>
       </ScrollView>
-      <Slider key={active} style={styles.slider} {...editor.sliderProps(active)} />
+      {active === 'straighten' ? (
+        <Slider
+          style={styles.slider}
+          minimumValue={-45}
+          maximumValue={45}
+          value={editor.edits.crop?.straighten ?? 0}
+          onSlidingStart={editor.beginGesture}
+          onValueChange={(value) => editor.update((s) => withStraighten(s, value))}
+          onSlidingComplete={editor.endGesture}
+        />
+      ) : (
+        <Slider key={active} style={styles.slider} {...editor.sliderProps(active)} />
+      )}
+
+      <View style={styles.row}>
+        <Button title="Rotate" onPress={() => editor.update(rotateRight)} />
+        <Button title="Flip" onPress={() => editor.update(flipHorizontal)} />
+        {load && (
+          <Button
+            title="Crop 1:1"
+            onPress={() => editor.update((s) => squareCrop(s, load.sourceWidth, load.sourceHeight))}
+          />
+        )}
+      </View>
 
       <View style={styles.row}>
         <Button
@@ -164,6 +201,18 @@ export default function App() {
       {error && <Text style={styles.error}>{error}</Text>}
     </View>
   );
+}
+
+// Toggles a centered square crop (in the photo as currently rotated), keeping rotation and flips.
+function squareCrop(stack: EditStack, width: number, height: number): EditStack {
+  const crop = stack.crop ?? createCrop();
+  if (crop.aspect === '1:1')
+    return withCrop(stack, { ...crop, rect: [0, 0, 1, 1], aspect: 'free' });
+  // Width / height of the photo as shown, after the quarter turns.
+  const shown = crop.rotation % 180 === 0 ? width / height : height / width;
+  const rect: [number, number, number, number] =
+    shown > 1 ? [(1 - 1 / shown) / 2, 0, 1 / shown, 1] : [0, (1 - shown) / 2, 1, shown];
+  return withCrop(stack, { ...crop, rect, aspect: '1:1' });
 }
 
 function Button({

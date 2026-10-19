@@ -7,25 +7,84 @@ package expo.modules.photoengine
 // formats, so the two GPUs see exactly the same numbers and no platform color conversion
 // sneaks in.
 internal object Shaders {
-  // One quad as a 4-vertex triangle strip built from gl_VertexID (no vertex buffers).
-  // uVParams.xy = scale in clip space, uVParams.z = 1 to flip vertically.
+  // One quad as a 4-vertex triangle strip built from gl_VertexID (no vertex buffers), scaled to
+  // aspect-fit the target. uVParams = (scale x, scale y, 1 to flip vertically,
+  // texture width / height), uCrop = crop rect and geo (see cropToSource).
   const val VERTEX = """#version 300 es
 uniform vec4 uVParams;
+uniform vec4 uCrop[2];
 out vec2 vUv;
+out vec2 vSrcUv;
 const vec2 corners[4] = vec2[4](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(-1.0, 1.0), vec2(1.0, 1.0));
+
+// BEGIN SHARED GEOMETRY
+// Identical in ios/Shaders.swift and android/.../Shaders.kt, like SHARED ADJUSTMENTS below.
+//
+// Maps a point of the output (0..1, y down) to the texture coordinate to read.
+// rect = crop [x, y, width, height], 0..1 in the image after rotation and flips.
+// geo = (clockwise quarter turns, straighten in radians clockwise, flipH, flipV).
+// srcAspect = width / height of the texture.
+// Lengths are in units of the texture's height. Rotation happens first, then the flips, then the
+// crop. Straightening turns the picture about the crop center and zooms in just enough that the
+// crop never shows anything outside the photo.
+
+vec2 rotateClockwise(vec2 p, float angle) {
+  float c = cos(angle);
+  float s = sin(angle);
+  return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
+// Smallest zoom that keeps center + corner / zoom inside [0, size].
+float zoomToFit(vec2 corner, vec2 center, vec2 size) {
+  vec2 room = max(size - center, vec2(0.000001));
+  vec2 roomBefore = max(center, vec2(0.000001));
+  return max(max(corner.x / room.x, -corner.x / roomBefore.x),
+             max(corner.y / room.y, -corner.y / roomBefore.y));
+}
+
+vec2 cropToSource(vec2 outUv, vec4 rect, vec4 geo, float srcAspect) {
+  int turns = int(geo.x + 0.5);
+  vec2 size = (turns == 1 || turns == 3) ? vec2(1.0, srcAspect) : vec2(srcAspect, 1.0);
+  vec2 center = (rect.xy + rect.zw * 0.5) * size;
+  vec2 halfSize = rect.zw * 0.5 * size;
+
+  float zoom = 1.0;
+  zoom = max(zoom, zoomToFit(rotateClockwise(vec2(-halfSize.x, -halfSize.y), -geo.y), center, size));
+  zoom = max(zoom, zoomToFit(rotateClockwise(vec2(halfSize.x, -halfSize.y), -geo.y), center, size));
+  zoom = max(zoom, zoomToFit(rotateClockwise(vec2(-halfSize.x, halfSize.y), -geo.y), center, size));
+  zoom = max(zoom, zoomToFit(rotateClockwise(vec2(halfSize.x, halfSize.y), -geo.y), center, size));
+
+  // Point in the rotated and flipped image.
+  vec2 offset = (outUv - 0.5) * rect.zw * size;
+  vec2 q = center + rotateClockwise(offset, -geo.y) / zoom;
+  // Undo the flips.
+  q.x = q.x + (size.x - 2.0 * q.x) * geo.z;
+  q.y = q.y + (size.y - 2.0 * q.y) * geo.w;
+  // Undo the quarter turns. A clockwise turn moves texture point (x, y) to (1 - y, x).
+  vec2 p = q;
+  if (turns == 1) { p = vec2(q.y, 1.0 - q.x); }
+  if (turns == 2) { p = vec2(srcAspect - q.x, 1.0 - q.y); }
+  if (turns == 3) { p = vec2(srcAspect - q.y, q.x); }
+  return vec2(p.x / srcAspect, p.y);
+}
+// END SHARED GEOMETRY
+
 void main() {
   vec2 p = corners[gl_VertexID];
   gl_Position = vec4(p * uVParams.xy, 0.0, 1.0);
-  // Clip-space top (y = +1) samples the first image row (v = 0).
+  // Clip-space top (y = +1) shows the top of the output (v = 0).
   vUv = vec2((p.x + 1.0) * 0.5, (1.0 - p.y) * 0.5);
   if (uVParams.z > 0.5) { vUv.y = 1.0 - vUv.y; }
+  // The mapping is affine, so computing it per corner and interpolating is exact.
+  vSrcUv = cropToSource(vUv, uCrop[0], uCrop[1], uVParams.w);
 }
 """
 
-  // uParams[0..2] = p0, p1, p2 of applyAdjustments.
+  // uParams[0..2] = p0, p1, p2 of applyAdjustments. uParams[2].z is the output's width / height.
   const val FRAGMENT = """#version 300 es
 precision highp float;
 in vec2 vUv;
+in vec2 vSrcUv;
 uniform sampler2D uImage;
 uniform vec4 uParams[3];
 out vec4 fragColor;
@@ -49,9 +108,9 @@ vec3 linearToSrgb(vec3 c) {
 //
 // p0 = (exposure, contrast, highlights, shadows)
 // p1 = (saturation, vibrance, warmth, tint)
-// p2 = (sharpness, vignette, unused, unused)
+// p2 = (sharpness, vignette, output width / height, unused)
 // srgb is the pixel, blur the average of its 4 neighbours, both sRGB-encoded 0..1.
-// uv is the position in the image (0..1) and aspect its width / height.
+// uv is the position in the output (0..1) and aspect its width / height.
 // Returns the edited, sRGB-encoded color.
 vec3 applyAdjustments(vec3 srgb, vec3 blur, vec2 uv, float aspect, vec4 p0, vec4 p1, vec4 p2) {
   // Sharpness: unsharp mask on the encoded values, before any tone change.
@@ -95,18 +154,18 @@ vec3 applyAdjustments(vec3 srgb, vec3 blur, vec2 uv, float aspect, vec4 p0, vec4
 
 void main() {
   vec2 size = vec2(textureSize(uImage, 0));
-  vec4 color = texture(uImage, vUv);
+  vec4 color = texture(uImage, vSrcUv);
   vec3 blur = color.rgb;
   // Only pay for the 4 extra reads when sharpening is on. The branch is uniform per draw.
   if (uParams[2].x > 0.0) {
     vec2 texel = 1.0 / size;
-    blur = (texture(uImage, vUv + vec2(texel.x, 0.0)).rgb
-          + texture(uImage, vUv - vec2(texel.x, 0.0)).rgb
-          + texture(uImage, vUv + vec2(0.0, texel.y)).rgb
-          + texture(uImage, vUv - vec2(0.0, texel.y)).rgb) * 0.25;
+    blur = (texture(uImage, vSrcUv + vec2(texel.x, 0.0)).rgb
+          + texture(uImage, vSrcUv - vec2(texel.x, 0.0)).rgb
+          + texture(uImage, vSrcUv + vec2(0.0, texel.y)).rgb
+          + texture(uImage, vSrcUv - vec2(0.0, texel.y)).rgb) * 0.25;
   }
   vec3 edited = applyAdjustments(
-    color.rgb, blur, vUv, size.x / size.y, uParams[0], uParams[1], uParams[2]);
+    color.rgb, blur, vUv, uParams[2].z, uParams[0], uParams[1], uParams[2]);
   fragColor = vec4(edited, color.a);
 }
 """

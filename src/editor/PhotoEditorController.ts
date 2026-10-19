@@ -78,6 +78,14 @@ export class PhotoEditorController {
     this.apply(next);
   }
 
+  /**
+   * Applies a change to the current edits, e.g. `update(rotateRight)` or
+   * `update((s) => withStraighten(s, 3))`. One undo step, or part of the gesture in progress.
+   */
+  update(change: (edits: EditStack) => EditStack): void {
+    this.apply(change(this.draft));
+  }
+
   undo(): void {
     this.sync(this.history.undo());
   }

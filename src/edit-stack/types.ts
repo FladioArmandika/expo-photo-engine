@@ -47,6 +47,11 @@ export type CropRotation = 0 | 90 | 180 | 270;
 /** `free`, `original`, or a ratio such as `4:5`. UI constraint only: `rect` is the truth. */
 export type CropAspect = 'free' | 'original' | `${number}:${number}`;
 
+/**
+ * Geometry, applied in this order: `rotation`, then the flips, then `rect`, then `straighten`.
+ * Use rotateRight, flipHorizontal and flipVertical to change rotation and flips: they keep `rect`
+ * on the same part of the photo.
+ */
 export type Crop = {
   /**
    * Normalized [x, y, width, height] in the image after `rotation` and the flips are applied.
@@ -55,9 +60,14 @@ export type Crop = {
   rect: [number, number, number, number];
   /** Clockwise quarter turns. */
   rotation: CropRotation;
-  /** Fine rotation in degrees about the crop center, -45..45. */
+  /**
+   * Fine rotation in degrees, clockwise, about the crop center, -45..45. The picture is zoomed in
+   * just enough that the crop never shows anything outside the photo.
+   */
   straighten: number;
+  /** Mirror left-right, after rotation. */
   flipH: boolean;
+  /** Mirror top-bottom, after rotation. */
   flipV: boolean;
   aspect: CropAspect;
 };

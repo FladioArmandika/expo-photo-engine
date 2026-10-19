@@ -42,6 +42,7 @@ export type PhotoEditor = {
   | 'setCrop'
   | 'setFilter'
   | 'setEdits'
+  | 'update'
   | 'beginGesture'
   | 'endGesture'
   | 'undo'
@@ -87,6 +88,7 @@ export function usePhotoEditor(options: UsePhotoEditorOptions = {}): PhotoEditor
       setCrop: (crop) => c.setCrop(crop),
       setFilter: (filter) => c.setFilter(filter),
       setEdits: (stack) => c.setEdits(stack),
+      update: (change) => c.update(change),
       beginGesture: () => c.beginGesture(),
       endGesture: () => c.endGesture(),
       undo: () => c.undo(),

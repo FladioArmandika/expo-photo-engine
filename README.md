@@ -20,7 +20,7 @@ same result on iOS and Android.
 
 > [!WARNING]
 > **Pre-alpha.** The ten adjustments and PNG/JPEG export work and are being benchmarked on
-> devices. Crop and filters are not built yet. Everything marked _planned_ below is the v1 target,
+> devices. Filters and the crop handles UI are not built yet. Everything marked _planned_ below is the v1 target,
 > not shipped code. Don't use it in production yet.
 
 ## Why
@@ -89,7 +89,8 @@ general-purpose 2D canvas.
 | Render stats: fps, CPU/GPU frame time, input latency, preview size | ✅ spike |
 | Exposure, contrast, highlights, shadows, saturation, vibrance, warmth, tint, sharpness, vignette | ✅ |
 | Headless export (PNG, JPEG) | ✅ spike |
-| Crop, 90° rotation, straighten, flip + optional `CropOverlay` | planned |
+| Crop, 90° rotation, straighten, flip | ✅ |
+| Optional `CropOverlay` with drag handles | planned |
 | LUT filters with intensity, filter catalog as data, live thumbnails | planned |
 | Edit stack: types, validation, migration, undo/redo history | ✅ |
 | `usePhotoEditor` hook: undo/redo, unsaved-changes flag, slider wiring | ✅ |
@@ -167,6 +168,7 @@ const editor = usePhotoEditor({
 | `setAdjustment(key, value)` | Sets one value. Outside a gesture it is its own undo step. |
 | `beginGesture()`, `endGesture()` | Group everything in between into one undo step. Use these with your own slider or gesture code. |
 | `setCrop(crop)`, `setFilter(filter)`, `setEdits(stack)` | One undo step each. |
+| `update(change)` | Applies a function to the current edits, e.g. `update(rotateRight)`. One undo step, or part of the gesture in progress. |
 | `reset(stack?)` | Start over (default: the original photo) with an empty history. |
 
 The logic lives in `PhotoEditorController`, a plain class exported too, if you want it outside
@@ -227,9 +229,24 @@ history.undo();
 0 is neutral for all of them, so an empty stack is the original photo. `ADJUSTMENTS` exports the
 ranges (plus a step and a label) so sliders don't hard-code them.
 
-`crop` (normalized rect, 90° rotation, straighten, flips) and `filter` (LUT id + intensity) are
-already part of the format and validated; rendering them is planned. Stacks always migrate
-forward, so a stack saved today keeps opening in later versions.
+#### Crop, rotate, straighten, flip
+
+```ts
+import { rotateRight, flipHorizontal, withStraighten, withCrop, createCrop } from '@fladioarmandika/expo-photo-engine';
+
+editor.update(rotateRight);                     // quarter turn clockwise
+editor.update(flipHorizontal);                  // mirror what's shown left-right
+editor.update((s) => withStraighten(s, 2.5));   // degrees, clockwise, -45..45
+editor.update((s) => withCrop(s, createCrop({ rect: [0.1, 0.1, 0.8, 0.8] })));
+```
+
+`crop.rect` is `[x, y, width, height]` from 0 to 1, measured on the photo as shown after rotation
+and flips. `rotateRight` and the flips move the rect along with the photo, so the same area stays
+selected. Straightening zooms in just enough that the crop never shows anything outside the
+photo. The preview, the export and its pixel size all follow the crop.
+
+`filter` (LUT id + intensity) is already part of the format and validated; rendering it is
+planned. Stacks always migrate forward, so a stack saved today keeps opening in later versions.
 
 ## How it works
 
@@ -246,6 +263,9 @@ decode + EXIF orientation ─▶ proxy texture (sized to the view) ─▶ crop �
   formats. Both GPUs receive the same 8-bit sRGB values and run the same hand-written math. The
   adjustment code is one block of text pasted into both the Metal and the GLSL shader, CI fails if
   the two copies differ, and the GLSL output is checked against a float64 JavaScript reference.
+- **Geometry in the vertex shader:** crop, rotation, flips and straighten are one mapping from
+  output to photo, computed by a second shared block of shader code, so they cost nothing per
+  pixel and never resample the image twice.
 - **Order:** sharpness, then exposure, white balance and vignette in linear light, then
   highlights/shadows, contrast, saturation and vibrance on the sRGB values.
 - **Never blocks JS:** slider updates only store a value and mark the frame dirty; the native side
@@ -272,7 +292,7 @@ node scripts/compare-images.mjs ios.png android.png diff.png
 
 ## Roadmap
 
-**v1:** crop/rotate/straighten with `CropOverlay`, LUT filters with
+**v1:** `CropOverlay`, LUT filters with
 thumbnails, HEIC export and metadata, golden-image tests in CI.
 
 **Later:** drawing, text, stickers, custom LUT import, masks and local adjustments, RAW, web.

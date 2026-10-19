@@ -9,6 +9,7 @@ internal class GlPhotoProgram {
   private val program: Int
   private val uVParams: Int
   private val uParams: Int
+  private val uCrop: Int
   private val uImage: Int
   private val vertexArray: Int
 
@@ -27,6 +28,7 @@ internal class GlPhotoProgram {
 
     uVParams = GLES30.glGetUniformLocation(program, "uVParams")
     uParams = GLES30.glGetUniformLocation(program, "uParams")
+    uCrop = GLES30.glGetUniformLocation(program, "uCrop")
     uImage = GLES30.glGetUniformLocation(program, "uImage")
 
     // The quad comes from gl_VertexID, but some drivers still refuse to draw without a VAO bound.
@@ -35,13 +37,17 @@ internal class GlPhotoProgram {
     vertexArray = arrays[0]
   }
 
-  /** Draws [texture] aspect-fitted into the current viewport of size [targetWidth]x[targetHeight]. */
+  /**
+   * Draws [texture], cropped as [params] says, aspect-fitted into the current viewport of size
+   * [targetWidth]x[targetHeight].
+   */
   fun draw(
     texture: Int, textureWidth: Int, textureHeight: Int,
     targetWidth: Int, targetHeight: Int,
     params: ShaderParams, flipY: Boolean, nearest: Boolean
   ) {
-    val imageAspect = textureWidth.toFloat() / textureHeight
+    val output = params.crop.outputSize(textureWidth, textureHeight)
+    val imageAspect = output.first.toFloat() / output.second
     val targetAspect = targetWidth.toFloat() / maxOf(targetHeight, 1)
     var scaleX = 1f
     var scaleY = 1f
@@ -55,8 +61,9 @@ internal class GlPhotoProgram {
     GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, filter)
     GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, filter)
     GLES30.glUniform1i(uImage, 0)
-    GLES30.glUniform4f(uVParams, scaleX, scaleY, if (flipY) 1f else 0f, 0f)
-    GLES30.glUniform4fv(uParams, 3, params.values, 0)
+    GLES30.glUniform4f(uVParams, scaleX, scaleY, if (flipY) 1f else 0f, textureWidth.toFloat() / textureHeight)
+    GLES30.glUniform4fv(uCrop, 2, params.crop.packed, 0)
+    GLES30.glUniform4fv(uParams, 3, params.packed(outputAspect = imageAspect), 0)
     GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
   }
 
@@ -108,24 +115,73 @@ internal class GlPhotoProgram {
 }
 
 /**
- * Adjustment values the fragment shader reads, keyed like `AdjustmentKey` in src/edit-stack/types.ts.
+ * Crop, rotation, straighten and flips, as the vertex shader reads them. Mirrors `Crop` in
+ * src/edit-stack/types.ts; the default is no crop.
+ */
+internal class CropGeometry(
+  /** Normalized [x, y, width, height] in the image after rotation and flips. */
+  val rect: FloatArray = floatArrayOf(0f, 0f, 1f, 1f),
+  /** Clockwise quarter turns, 0..3. */
+  val turns: Int = 0,
+  /** Degrees, clockwise. */
+  val straighten: Float = 0f,
+  val flipH: Boolean = false,
+  val flipV: Boolean = false,
+) {
+  constructor(record: CropRecord) : this(
+    rect = if (record.rect.size == 4) FloatArray(4) { record.rect[it].toFloat() } else floatArrayOf(0f, 0f, 1f, 1f),
+    turns = Math.floorMod(record.rotation / 90, 4),
+    straighten = record.straighten.toFloat(),
+    flipH = record.flipH,
+    flipV = record.flipV,
+  )
+
+  /** Output size in pixels when cropping an image of [width] x [height]. */
+  fun outputSize(width: Int, height: Int): Pair<Int, Int> {
+    val (w, h) = if (turns % 2 == 1) height to width else width to height
+    return maxOf(1, Math.round(w * rect[2])) to maxOf(1, Math.round(h * rect[3]))
+  }
+
+  /** Longest side of the crop as a fraction of the image's longest side. */
+  fun longestFraction(width: Int, height: Int): Float {
+    val (w, h) = if (turns % 2 == 1) height to width else width to height
+    return maxOf(w * rect[2], h * rect[3]) / maxOf(w, h)
+  }
+
+  val packed: FloatArray
+    get() = floatArrayOf(
+      rect[0], rect[1], rect[2], rect[3],
+      turns.toFloat(), Math.toRadians(straighten.toDouble()).toFloat(),
+      if (flipH) 1f else 0f, if (flipV) 1f else 0f,
+    )
+}
+
+/**
+ * Everything the shaders read, keyed like `AdjustmentKey` in src/edit-stack/types.ts.
  * Unknown keys are ignored, missing ones are neutral (0). Immutable, so the render thread can read
  * one while the main thread builds the next.
  */
-internal class ShaderParams private constructor(val values: FloatArray) {
-  constructor() : this(FloatArray(12))
+internal class ShaderParams private constructor(
+  private val values: FloatArray,
+  val crop: CropGeometry,
+) {
+  constructor() : this(FloatArray(12), CropGeometry())
 
-  constructor(adjustments: Map<String, Double>) : this(
+  constructor(adjustments: Map<String, Double>, crop: CropGeometry = CropGeometry()) : this(
     FloatArray(12).also { values ->
       for ((key, value) in adjustments) SLOTS[key]?.let { values[it] = value.toFloat() }
-    }
+    },
+    crop,
   )
 
   /** Returns a copy with [key] changed, or null for a key the shader doesn't know. */
   fun with(key: String, value: Double): ShaderParams? {
     val slot = SLOTS[key] ?: return null
-    return ShaderParams(values.copyOf().also { it[slot] = value.toFloat() })
+    return ShaderParams(values.copyOf().also { it[slot] = value.toFloat() }, crop)
   }
+
+  /** The fragment shader's uParams[3], with the output's width / height filled in. */
+  fun packed(outputAspect: Float): FloatArray = values.copyOf().also { it[OUTPUT_ASPECT_SLOT] = outputAspect }
 
   companion object {
     /** Slot of each key in `uParams[3]`. Mirrors applyAdjustments in Shaders.kt. */
@@ -134,5 +190,6 @@ internal class ShaderParams private constructor(val values: FloatArray) {
       "saturation" to 4, "vibrance" to 5, "warmth" to 6, "tint" to 7,
       "sharpness" to 8, "vignette" to 9,
     )
+    private const val OUTPUT_ASPECT_SLOT = 10
   }
 }

@@ -6,8 +6,17 @@ import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.records.Field
 import expo.modules.kotlin.records.Record
 
+class CropRecord : Record {
+  @Field val rect: List<Double> = listOf(0.0, 0.0, 1.0, 1.0)
+  @Field val rotation: Int = 0
+  @Field val straighten: Double = 0.0
+  @Field val flipH: Boolean = false
+  @Field val flipV: Boolean = false
+}
+
 class EditStackRecord : Record {
   @Field val version: Int = 1
+  @Field val crop: CropRecord? = null
   @Field val adjustments: Map<String, Double> = emptyMap()
 }
 
@@ -17,7 +26,7 @@ class ExportOptionsRecord : Record {
   @Field val maxDimension: Int = 0
 }
 
-internal fun EditStackRecord.toShaderParams() = ShaderParams(adjustments)
+internal fun EditStackRecord.toShaderParams() = ShaderParams(adjustments, crop?.let(::CropGeometry) ?: CropGeometry())
 
 class ExpoPhotoEngineModule : Module() {
   override fun definition() = ModuleDefinition {

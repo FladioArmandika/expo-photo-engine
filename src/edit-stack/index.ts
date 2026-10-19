@@ -11,6 +11,11 @@ export {
   withAdjustment,
   withCrop,
   withFilter,
+  createCrop,
+  rotateRight,
+  flipHorizontal,
+  flipVertical,
+  withStraighten,
   isNeutral,
   editStacksEqual,
 } from './operations';

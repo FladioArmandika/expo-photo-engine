@@ -20,23 +20,73 @@ enum PhotoEngineError: Error, CustomStringConvertible {
   }
 }
 
-/// Adjustment values the fragment shader reads, keyed like `AdjustmentKey` in src/edit-stack/types.ts.
+/// Crop, rotation, straighten and flips, as the vertex shader reads them. Mirrors `Crop` in
+/// src/edit-stack/types.ts; the default is no crop.
+struct CropGeometry: Equatable {
+  /// Normalized [x, y, width, height] in the image after rotation and flips.
+  var rect = SIMD4<Float>(0, 0, 1, 1)
+  /// Clockwise quarter turns, 0...3.
+  var turns = 0
+  /// Degrees, clockwise.
+  var straighten: Float = 0
+  var flipH = false
+  var flipV = false
+
+  init() {}
+
+  init(_ record: CropRecord) {
+    if record.rect.count == 4 {
+      rect = SIMD4(record.rect.map { Float($0) })
+    }
+    turns = ((record.rotation / 90) % 4 + 4) % 4
+    straighten = Float(record.straighten)
+    flipH = record.flipH
+    flipV = record.flipV
+  }
+
+  /// Output size in pixels when cropping an image of `width` x `height`.
+  func outputSize(width: Int, height: Int) -> (width: Int, height: Int) {
+    let (w, h) = turns % 2 == 1 ? (height, width) : (width, height)
+    return (
+      max(1, Int((Float(w) * rect.z).rounded())),
+      max(1, Int((Float(h) * rect.w).rounded()))
+    )
+  }
+
+  /// Longest side of the crop as a fraction of the image's longest side.
+  func longestFraction(width: Int, height: Int) -> Float {
+    let (w, h) = turns % 2 == 1 ? (height, width) : (width, height)
+    return max(Float(w) * rect.z, Float(h) * rect.w) / Float(max(w, h))
+  }
+
+  var packed: [SIMD4<Float>] {
+    [rect, SIMD4(Float(turns), straighten * .pi / 180, flipH ? 1 : 0, flipV ? 1 : 0)]
+  }
+}
+
+/// Everything the shaders read, keyed like `AdjustmentKey` in src/edit-stack/types.ts.
 /// Unknown keys are ignored, missing ones are neutral (0).
 struct ShaderParams {
-  /// Slot of each key in the three float4s the shader receives. Mirrors applyAdjustments in Shaders.swift.
+  /// Slot of each key in the three float4s the fragment shader receives. Mirrors applyAdjustments in Shaders.swift.
   static let slots: [String: Int] = [
     "exposure": 0, "contrast": 1, "highlights": 2, "shadows": 3,
     "saturation": 4, "vibrance": 5, "warmth": 6, "tint": 7,
     "sharpness": 8, "vignette": 9,
   ]
+  /// p2.z: the output's width / height, filled in at draw time.
+  static let outputAspectSlot = 10
 
   private(set) var values = [Float](repeating: 0, count: 12)
+  var crop = CropGeometry()
 
   init() {}
 
-  init(adjustments: [String: Double]) {
+  init(adjustments: [String: Double], crop: CropRecord? = nil) {
     for (key, value) in adjustments {
       set(key, value)
+    }
+    if let crop {
+      self.crop = CropGeometry(crop)
     }
   }
 
@@ -48,8 +98,10 @@ struct ShaderParams {
     return true
   }
 
-  var packed: [SIMD4<Float>] {
-    stride(from: 0, to: 12, by: 4).map { SIMD4(values[$0], values[$0 + 1], values[$0 + 2], values[$0 + 3]) }
+  func packed(outputAspect: Float) -> [SIMD4<Float>] {
+    var v = values
+    v[Self.outputAspectSlot] = outputAspect
+    return stride(from: 0, to: 12, by: 4).map { SIMD4(v[$0], v[$0 + 1], v[$0 + 2], v[$0 + 3]) }
   }
 }
 
@@ -192,23 +244,27 @@ final class PhotoRenderer: @unchecked Sendable {
 
   // MARK: - Drawing
 
-  /// Encodes one draw of `texture` with `params` into `encoder`, aspect-fitted to `targetSize`.
+  /// Encodes one draw of `texture` with `params` into `encoder`: the cropped image,
+  /// aspect-fitted to `targetSize`.
   func encodeDraw(
     _ encoder: MTLRenderCommandEncoder, pipeline: MTLRenderPipelineState, sampler: MTLSamplerState,
     texture: MTLTexture, params: ShaderParams, targetSize: CGSize, flipY: Bool = false
   ) {
-    let imageAspect = Float(texture.width) / Float(texture.height)
+    let output = params.crop.outputSize(width: texture.width, height: texture.height)
+    let imageAspect = Float(output.width) / Float(output.height)
     let targetAspect = Float(targetSize.width / max(targetSize.height, 1))
-    var vparams = SIMD4<Float>(1, 1, flipY ? 1 : 0, 0)
+    var scale = SIMD2<Float>(1, 1)
     if imageAspect > targetAspect {
-      vparams.y = targetAspect / imageAspect
+      scale.y = targetAspect / imageAspect
     } else {
-      vparams.x = imageAspect / targetAspect
+      scale.x = imageAspect / targetAspect
     }
-    var fparams = params.packed
+    let textureAspect = Float(texture.width) / Float(texture.height)
+    var vparams = [SIMD4<Float>(scale.x, scale.y, flipY ? 1 : 0, textureAspect)] + params.crop.packed
+    var fparams = params.packed(outputAspect: imageAspect)
 
     encoder.setRenderPipelineState(pipeline)
-    encoder.setVertexBytes(&vparams, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)
+    encoder.setVertexBytes(&vparams, length: MemoryLayout<SIMD4<Float>>.stride * vparams.count, index: 0)
     encoder.setFragmentBytes(&fparams, length: MemoryLayout<SIMD4<Float>>.stride * fparams.count, index: 0)
     encoder.setFragmentTexture(texture, index: 0)
     encoder.setFragmentSamplerState(sampler, index: 0)
@@ -224,14 +280,19 @@ final class PhotoRenderer: @unchecked Sendable {
     let start = CACurrentMediaTime()
     let url = try Self.url(for: source)
     let full = try Self.orientedSize(of: url)
-    var longest = max(full.width, full.height)
-    if maxDimension > 0 { longest = min(longest, maxDimension) }
+    let fullLongest = max(full.width, full.height)
+    var longest = fullLongest
+    if maxDimension > 0 {
+      // maxDimension limits the cropped output, so decode just large enough for the crop to reach it.
+      let fraction = params.crop.longestFraction(width: full.width, height: full.height)
+      let needed = (Float(maxDimension) / fraction).rounded(.up)
+      longest = min(longest, Int(min(needed, Float(fullLongest))))
+    }
     longest = min(longest, Self.maxTextureSize)
 
     let image = try Self.decode(url: url, maxPixelSize: longest)
     let input = try makeTexture(from: image)
-    let width = input.width
-    let height = input.height
+    let (width, height) = params.crop.outputSize(width: input.width, height: input.height)
 
     let descriptor = MTLTextureDescriptor.texture2DDescriptor(
       pixelFormat: .rgba8Unorm, width: width, height: height, mipmapped: false)
@@ -251,9 +312,11 @@ final class PhotoRenderer: @unchecked Sendable {
       throw PhotoEngineError.renderFailed("could not create encoder")
     }
     let renderStart = CACurrentMediaTime()
-    // 1:1 texel mapping with nearest sampling: every output pixel reads exactly one input pixel.
+    // Without straightening every output pixel lands on exactly one input pixel, so nearest
+    // sampling copies it exactly. A straightened image falls between pixels and needs filtering.
+    let sampler = params.crop.straighten == 0 ? nearestSampler : linearSampler
     encodeDraw(
-      encoder, pipeline: exportPipeline, sampler: nearestSampler, texture: input, params: params,
+      encoder, pipeline: exportPipeline, sampler: sampler, texture: input, params: params,
       targetSize: CGSize(width: width, height: height))
     encoder.endEncoding()
     commandBuffer.commit()
