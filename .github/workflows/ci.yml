@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  js:
+    name: Lint, types, tests, shader check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm test -- --ci
+      - name: Install example dependencies
+        run: npm ci
+        working-directory: example
+      - name: Type-check example
+        run: npx tsc --noEmit
+        working-directory: example
+      - name: GLSL vs reference (headless Chromium WebGL2)
+        run: |
+          npx playwright-core install chromium
+          node scripts/check-glsl.mjs
+
+  android:
+    name: Android build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+      - run: npm ci
+        working-directory: example
+      - run: npx expo prebuild --platform android --no-install
+        working-directory: example
+      - name: Assemble example app (compiles the module's Kotlin)
+        run: ./gradlew assembleDebug --no-daemon
+        working-directory: example/android
+
+  ios:
+    name: iOS build
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Compile Metal shaders offline
+        run: node scripts/check-metal.mjs
+      - run: npm ci
+      - run: npm ci
+        working-directory: example
+      - run: npx expo prebuild --platform ios
+        working-directory: example
+      - name: Build example app for the simulator (compiles the module's Swift and Metal source)
+        working-directory: example/ios
+        run: |
+          workspace=$(ls -d *.xcworkspace | head -1)
+          scheme="${workspace%.xcworkspace}"
+          set -o pipefail
+          xcodebuild -workspace "$workspace" -scheme "$scheme" -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build | tail -200

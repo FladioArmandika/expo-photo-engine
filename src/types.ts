@@ -1,22 +1,3 @@
-// Spike-level types. The full EditStack (crop, filter, all adjustments) is proposed
-// separately and lands after the spike is reviewed.
-
-/** Adjustments implemented by the native shaders. Spike: exposure only. */
-export type AdjustmentKey = 'exposure';
-
-export type Adjustments = {
-  /**
-   * Exposure in photographic stops (EV), applied in linear light.
-   * Range -3..3, 0 = neutral. +1 doubles the light, -1 halves it.
-   */
-  exposure?: number;
-};
-
-export type EditStack = {
-  version: 1;
-  adjustments: Adjustments;
-};
-
 export type PreviewQuality = 'auto' | 'fast' | 'full';
 
 export type RenderStats = {
