@@ -1,15 +1,12 @@
 import {
   ADJUSTMENT_KEYS,
   ADJUSTMENTS,
-  createEditStack,
   exportImage,
   PhotoCanvas,
-  withAdjustment,
+  usePhotoEditor,
   type AdjustmentKey,
-  type EditStack,
   type ExportResult,
   type LoadEvent,
-  type PhotoCanvasRef,
   type PreviewQuality,
   type RenderStats,
 } from '@fladioarmandika/expo-photo-engine';
@@ -18,17 +15,14 @@ import { Asset } from 'expo-asset';
 import * as ImagePicker from 'expo-image-picker';
 import * as Sharing from 'expo-sharing';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-// Test screen: every adjustment rendered by the native shader, driven through the imperative
-// ref so slider ticks never cause a React render. The edit stack lives in a ref for the same reason.
+// Test screen: every adjustment rendered by the native shader. usePhotoEditor sends slider ticks
+// straight to the canvas, so dragging never causes a React render, and makes each drag one undo step.
 export default function App() {
-  const canvas = useRef<PhotoCanvasRef>(null);
-  const edits = useRef<EditStack>(createEditStack());
+  const editor = usePhotoEditor();
   const [active, setActive] = useState<AdjustmentKey>('exposure');
-  // Bumped on reset so the slider remounts at its new value.
-  const [revision, setRevision] = useState(0);
   const [source, setSource] = useState<string | null>(null);
   const [quality, setQuality] = useState<PreviewQuality>('auto');
   const [load, setLoad] = useState<LoadEvent | null>(null);
@@ -37,33 +31,23 @@ export default function App() {
   const [exported, setExported] = useState<ExportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const setValue = (key: AdjustmentKey, value: number) => {
-    edits.current = withAdjustment(edits.current, key, value);
-    canvas.current?.setAdjustment(key, value);
-  };
-
-  const resetEdits = () => {
-    edits.current = createEditStack();
-    canvas.current?.setEdits(edits.current);
-    setRevision((r) => r + 1);
-  };
-
   // Auto-sweep the selected adjustment every frame from JS (the "stress test" input), no hands needed.
   useEffect(() => {
     if (!sweeping) return;
-    canvas.current?.beginInteraction();
+    const { controller } = editor;
+    controller.beginGesture();
     const { min, max } = ADJUSTMENTS[active];
     const start = performance.now();
     let frame = requestAnimationFrame(function tick(now) {
       const t = (Math.sin((now - start) / 600) + 1) / 2;
-      setValue(active, min + (max - min) * (min < 0 ? 0.15 + t * 0.7 : t));
+      controller.setAdjustment(active, min + (max - min) * (min < 0 ? 0.15 + t * 0.7 : t));
       frame = requestAnimationFrame(tick);
     });
     return () => {
       cancelAnimationFrame(frame);
-      canvas.current?.endInteraction();
+      controller.endGesture();
     };
-  }, [sweeping, active]);
+  }, [editor.controller, sweeping, active]);
 
   const pickPhoto = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -83,8 +67,7 @@ export default function App() {
   };
 
   const reset = (uri: string) => {
-    edits.current = createEditStack();
-    setRevision((r) => r + 1);
+    editor.reset();
     setSource(uri);
     setLoad(null);
     setStats(null);
@@ -96,7 +79,10 @@ export default function App() {
     if (!source) return;
     setExported(null);
     try {
-      const result = await exportImage(source, edits.current, { format: 'png', maxDimension: 0 });
+      const result = await exportImage(source, editor.getEdits(), {
+        format: 'png',
+        maxDimension: 0,
+      });
       setExported(result);
     } catch (e) {
       setError(String(e));
@@ -118,7 +104,7 @@ export default function App() {
       <View style={styles.canvasWrap}>
         {source ? (
           <PhotoCanvas
-            ref={canvas}
+            {...editor.canvasProps}
             source={source}
             previewQuality={quality}
             style={StyleSheet.absoluteFill}
@@ -143,7 +129,10 @@ export default function App() {
         </View>
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.chips}>
         {ADJUSTMENT_KEYS.map((key) => (
           <Pressable
             key={key}
@@ -153,30 +142,23 @@ export default function App() {
           </Pressable>
         ))}
       </ScrollView>
-      <Slider
-        key={`${active}-${revision}`}
-        style={styles.slider}
-        minimumValue={ADJUSTMENTS[active].min}
-        maximumValue={ADJUSTMENTS[active].max}
-        value={edits.current.adjustments[active] ?? 0}
-        onSlidingStart={() => canvas.current?.beginInteraction()}
-        onValueChange={(value) => setValue(active, value)}
-        onSlidingComplete={() => canvas.current?.endInteraction()}
-      />
+      <Slider key={active} style={styles.slider} {...editor.sliderProps(active)} />
 
       <View style={styles.row}>
         <Button
           title={sweeping ? 'Stop sweep' : 'Auto-sweep'}
           onPress={() => setSweeping((s) => !s)}
         />
-        <Button title="Reset" onPress={resetEdits} />
+        <Button title="Undo" disabled={!editor.canUndo} onPress={editor.undo} />
+        <Button title="Redo" disabled={!editor.canRedo} onPress={editor.redo} />
+        <Button title="Reset" onPress={() => editor.reset()} />
         <Button title="Export PNG" onPress={runExport} />
         {exported && <Button title="Share" onPress={() => Sharing.shareAsync(exported.uri)} />}
       </View>
       {exported && (
         <Text style={styles.info}>
-          Exported {exported.width}x{exported.height} in{' '}
-          {exported.totalMs.toFixed(0)}ms (render {exported.renderMs.toFixed(1)}ms)
+          Exported {exported.width}x{exported.height} in {exported.totalMs.toFixed(0)}ms (render{' '}
+          {exported.renderMs.toFixed(1)}ms)
         </Text>
       )}
       {error && <Text style={styles.error}>{error}</Text>}
@@ -184,10 +166,19 @@ export default function App() {
   );
 }
 
-function Button({ title, onPress }: { title: string; onPress: () => void }) {
+function Button({
+  title,
+  onPress,
+  disabled,
+}: {
+  title: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
   return (
     <Pressable
-      style={({ pressed }) => [styles.button, pressed && styles.pressed]}
+      disabled={disabled}
+      style={({ pressed }) => [styles.button, (pressed || disabled) && styles.pressed]}
       onPress={onPress}>
       <Text style={styles.buttonText}>{title}</Text>
     </Pressable>
