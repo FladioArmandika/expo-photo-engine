@@ -224,6 +224,8 @@ final class PhotoCanvasView: ExpoView {
     encoder.endEncoding()
 
     let stats = self.stats
+    #if !targetEnvironment(simulator)
+    // Presentation callbacks don't exist in the simulator SDK; latency reads -1 there.
     if let inputTime {
       // presentedTime is on the same clock as CACurrentMediaTime: true input-to-glass latency.
       drawable.addPresentedHandler { presented in
@@ -232,6 +234,9 @@ final class PhotoCanvasView: ExpoView {
         }
       }
     }
+    #else
+    _ = inputTime
+    #endif
     commandBuffer.addCompletedHandler { buffer in
       stats.addGpuTime(buffer.gpuEndTime - buffer.gpuStartTime)
     }
