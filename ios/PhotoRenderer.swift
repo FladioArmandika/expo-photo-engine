@@ -20,11 +20,37 @@ enum PhotoEngineError: Error, CustomStringConvertible {
   }
 }
 
-/// Parameters the fragment shader reads. Mirrors `params` in Shaders.swift.
+/// Adjustment values the fragment shader reads, keyed like `AdjustmentKey` in src/edit-stack/types.ts.
+/// Unknown keys are ignored, missing ones are neutral (0).
 struct ShaderParams {
-  var exposure: Float = 0
+  /// Slot of each key in the three float4s the shader receives. Mirrors applyAdjustments in Shaders.swift.
+  static let slots: [String: Int] = [
+    "exposure": 0, "contrast": 1, "highlights": 2, "shadows": 3,
+    "saturation": 4, "vibrance": 5, "warmth": 6, "tint": 7,
+    "sharpness": 8, "vignette": 9,
+  ]
 
-  var packed: SIMD4<Float> { SIMD4(exposure, 0, 0, 0) }
+  private(set) var values = [Float](repeating: 0, count: 12)
+
+  init() {}
+
+  init(adjustments: [String: Double]) {
+    for (key, value) in adjustments {
+      set(key, value)
+    }
+  }
+
+  /// Returns false for a key the shader doesn't know.
+  @discardableResult
+  mutating func set(_ key: String, _ value: Double) -> Bool {
+    guard let slot = Self.slots[key] else { return false }
+    values[slot] = Float(value)
+    return true
+  }
+
+  var packed: [SIMD4<Float>] {
+    stride(from: 0, to: 12, by: 4).map { SIMD4(values[$0], values[$0 + 1], values[$0 + 2], values[$0 + 3]) }
+  }
 }
 
 /// Process-wide Metal objects. Creating a device, queue and pipelines is expensive,
@@ -183,7 +209,7 @@ final class PhotoRenderer: @unchecked Sendable {
 
     encoder.setRenderPipelineState(pipeline)
     encoder.setVertexBytes(&vparams, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)
-    encoder.setFragmentBytes(&fparams, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)
+    encoder.setFragmentBytes(&fparams, length: MemoryLayout<SIMD4<Float>>.stride * fparams.count, index: 0)
     encoder.setFragmentTexture(texture, index: 0)
     encoder.setFragmentSamplerState(sampler, index: 0)
     encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)

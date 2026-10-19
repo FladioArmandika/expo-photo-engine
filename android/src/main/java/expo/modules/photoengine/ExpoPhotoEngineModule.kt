@@ -17,8 +17,7 @@ class ExportOptionsRecord : Record {
   @Field val maxDimension: Int = 0
 }
 
-internal fun EditStackRecord.toShaderParams() =
-  ShaderParams(exposure = (adjustments["exposure"] ?: 0.0).toFloat())
+internal fun EditStackRecord.toShaderParams() = ShaderParams(adjustments)
 
 class ExpoPhotoEngineModule : Module() {
   override fun definition() = ModuleDefinition {
