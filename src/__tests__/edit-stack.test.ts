@@ -1,17 +1,22 @@
 import {
   ADJUSTMENT_KEYS,
   ADJUSTMENTS,
+  createCrop,
   createEditStack,
   EditHistory,
   EditStackError,
   editStacksEqual,
+  flipHorizontal,
+  flipVertical,
   isNeutral,
   migrateEditStack,
+  rotateRight,
   serializeEditStack,
   validateEditStack,
   withAdjustment,
   withCrop,
   withFilter,
+  withStraighten,
   type Crop,
 } from '../edit-stack';
 
@@ -241,5 +246,66 @@ describe('EditHistory', () => {
       canRedo: false,
       isDirty: false,
     });
+  });
+});
+
+describe('crop geometry operations', () => {
+  // Where a point of the shown (rotated, flipped) image comes from in the original photo, both
+  // normalized 0..1. Square photo, so the aspect ratio drops out. Mirrors cropToSource in the shaders.
+  const toSource = (c: Crop, [u, v]: [number, number]): string => {
+    if (c.flipH) u = 1 - u;
+    if (c.flipV) v = 1 - v;
+    let p: [number, number] = [u, v];
+    if (c.rotation === 90) p = [v, 1 - u];
+    if (c.rotation === 180) p = [1 - u, 1 - v];
+    if (c.rotation === 270) p = [1 - v, u];
+    return p.map((n) => n.toFixed(6)).join(',');
+  };
+  const cornersInSource = (c: Crop) => {
+    const [x, y, w, h] = c.rect;
+    const corners: [number, number][] = [
+      [x, y],
+      [x + w, y],
+      [x, y + h],
+      [x + w, y + h],
+    ];
+    return corners.map((p) => toSource(c, p)).sort();
+  };
+  const start = withCrop(createEditStack(), {
+    ...createCrop({ rect: [0.1, 0.2, 0.3, 0.5], aspect: '3:5' }),
+    straighten: 4,
+  });
+
+  it.each([
+    ['rotateRight', rotateRight],
+    ['flipHorizontal', flipHorizontal],
+    ['flipVertical', flipVertical],
+  ])('%s keeps the crop on the same part of the photo', (_, op) => {
+    let stack = start;
+    for (let i = 0; i < 3; i++) {
+      const next = op(stack);
+      expect(cornersInSource(next.crop!)).toEqual(cornersInSource(stack.crop!));
+      stack = next;
+    }
+  });
+
+  it('rotateRight swaps the aspect and comes back after four turns', () => {
+    const once = rotateRight(start);
+    expect(once.crop!.rotation).toBe(90);
+    expect(once.crop!.aspect).toBe('5:3');
+    const four = rotateRight(rotateRight(rotateRight(once)));
+    expect(editStacksEqual(four, start)).toBe(true);
+  });
+
+  it('flips mirror the straighten angle and undo themselves', () => {
+    expect(flipHorizontal(start).crop!.straighten).toBe(-4);
+    expect(editStacksEqual(flipHorizontal(flipHorizontal(start)), start)).toBe(true);
+    expect(editStacksEqual(flipVertical(flipVertical(start)), start)).toBe(true);
+  });
+
+  it('works on a stack without a crop and clamps straighten', () => {
+    expect(rotateRight(createEditStack()).crop!.rect).toEqual([0, 0, 1, 1]);
+    expect(withStraighten(createEditStack(), 90).crop!.straighten).toBe(45);
+    expect(validateEditStack(rotateRight(start)).ok).toBe(true);
   });
 });

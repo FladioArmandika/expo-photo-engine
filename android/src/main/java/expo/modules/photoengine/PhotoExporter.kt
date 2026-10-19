@@ -10,6 +10,7 @@ import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.UUID
+import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
 
@@ -30,13 +31,19 @@ internal object PhotoExporter {
     val outputs = IntArray(1)
     try {
       val info = PhotoDecoder.readInfo(context, source)
-      var longest = max(info.width, info.height)
-      if (maxDimension > 0) longest = min(longest, maxDimension)
+      val fullLongest = max(info.width, info.height)
+      var longest = fullLongest
+      if (maxDimension > 0) {
+        // maxDimension limits the cropped output, so decode just large enough for the crop to reach it.
+        val needed = ceil(maxDimension / params.crop.longestFraction(info.width, info.height))
+        longest = min(longest, min(needed, fullLongest.toFloat()).toInt())
+      }
       longest = min(longest, GlPhotoProgram.maxTextureSize())
 
       val bitmap = PhotoDecoder.decode(context, source, longest, info)
-      val width = bitmap.width
-      val height = bitmap.height
+      val textureWidth = bitmap.width
+      val textureHeight = bitmap.height
+      val (width, height) = params.crop.outputSize(textureWidth, textureHeight)
       program = GlPhotoProgram()
       input = GlPhotoProgram.uploadTexture(bitmap)
       bitmap.recycle()
@@ -56,8 +63,12 @@ internal object PhotoExporter {
       val renderStart = SystemClock.elapsedRealtimeNanos()
       GLES30.glViewport(0, 0, width, height)
       // flipY: glReadPixels returns the bottom row first, so render upside down to read top-down.
-      // nearest: 1:1 texel mapping, every output pixel reads exactly one input pixel.
-      program.draw(input, width, height, width, height, params, flipY = true, nearest = true)
+      // nearest: without straightening every output pixel lands on exactly one input pixel, so
+      // nearest sampling copies it exactly. A straightened image falls between pixels and needs filtering.
+      program.draw(
+        input, textureWidth, textureHeight, width, height, params,
+        flipY = true, nearest = params.crop.straighten == 0f
+      )
       val pixels = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.nativeOrder())
       GLES30.glPixelStorei(GLES30.GL_PACK_ALIGNMENT, 1)
       GLES30.glReadPixels(0, 0, width, height, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, pixels)

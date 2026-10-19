@@ -1,5 +1,5 @@
 import type { PhotoCanvasRef } from '../PhotoCanvas';
-import { createEditStack } from '../edit-stack';
+import { createEditStack, rotateRight } from '../edit-stack';
 import { PhotoEditorController } from '../editor';
 
 function fakeCanvas() {
@@ -109,5 +109,15 @@ describe('PhotoEditorController', () => {
     expect(listener).not.toHaveBeenCalled();
     editor.endGesture();
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('PhotoEditorController.update', () => {
+  it('applies a change as one undo step', () => {
+    const editor = new PhotoEditorController();
+    editor.update(rotateRight);
+    expect(editor.getState().present.crop?.rotation).toBe(90);
+    editor.undo();
+    expect(editor.getState().present.crop).toBeNull();
   });
 });

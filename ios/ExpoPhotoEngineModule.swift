@@ -1,7 +1,16 @@
 import ExpoModulesCore
 
+struct CropRecord: Record {
+  @Field var rect: [Double] = [0, 0, 1, 1]
+  @Field var rotation: Int = 0
+  @Field var straighten: Double = 0
+  @Field var flipH: Bool = false
+  @Field var flipV: Bool = false
+}
+
 struct EditStackRecord: Record {
   @Field var version: Int = 1
+  @Field var crop: CropRecord? = nil
   @Field var adjustments: [String: Double] = [:]
 }
 
@@ -20,7 +29,7 @@ public class ExpoPhotoEngineModule: Module {
       guard let renderer = PhotoRenderer.shared else {
         throw PhotoEngineError.noMetalDevice
       }
-      let params = ShaderParams(adjustments: edits.adjustments)
+      let params = ShaderParams(adjustments: edits.adjustments, crop: edits.crop)
       return try renderer.export(
         source: source, params: params, format: options.format, quality: options.quality,
         maxDimension: options.maxDimension)
