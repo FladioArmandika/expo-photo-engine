@@ -1,4 +1,5 @@
 import {
+  createEditStack,
   exportImage,
   PhotoCanvas,
   type ExportResult,
@@ -76,7 +77,7 @@ export default function App() {
     try {
       const result = await exportImage(
         source,
-        { version: 1, adjustments: { exposure: exposure.current } },
+        createEditStack({ adjustments: { exposure: exposure.current } }),
         { format: 'png', maxDimension: 0 }
       );
       setExported(result);

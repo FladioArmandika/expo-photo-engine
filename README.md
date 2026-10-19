@@ -36,7 +36,12 @@ different on Android and iOS, and the edit is baked into the pixels.
 ## At a glance
 
 ```tsx
-import { PhotoCanvas, exportImage, type PhotoCanvasRef } from '@fladioarmandika/expo-photo-engine';
+import {
+  createEditStack,
+  exportImage,
+  PhotoCanvas,
+  type PhotoCanvasRef,
+} from '@fladioarmandika/expo-photo-engine';
 import Slider from '@react-native-community/slider';
 import { useRef } from 'react';
 import { Button } from 'react-native';
@@ -62,7 +67,7 @@ export function Editor({ uri }: { uri: string }) {
       <Button
         title="Save"
         onPress={() =>
-          exportImage(uri, { version: 1, adjustments: { exposure: exposure.current } }, { format: 'jpeg' })
+          exportImage(uri, createEditStack({ adjustments: { exposure: exposure.current } }), { format: 'jpeg' })
         }
       />
     </>
@@ -106,7 +111,8 @@ general-purpose 2D canvas.
 | Contrast, highlights, shadows, saturation, vibrance, warmth, tint, sharpness, vignette | planned |
 | Crop, 90° rotation, straighten, flip + optional `CropOverlay` | planned |
 | LUT filters with intensity, filter catalog as data, live thumbnails | planned |
-| `usePhotoEditor` hook: edit stack, undo/redo, dirty state | planned |
+| Edit stack: types, validation, migration, undo/redo history | ✅ |
+| `usePhotoEditor` hook binding history to the canvas | planned |
 | HEIC export, metadata (EXIF) preservation | planned |
 | Cross-platform golden-image tests in CI | planned |
 
@@ -178,18 +184,35 @@ still adjustable.
 ```json
 {
   "version": 1,
-  "adjustments": { "exposure": 0.4 }
+  "crop": null,
+  "adjustments": { "exposure": 0.4, "contrast": 0.15 },
+  "filter": null
 }
 ```
 
-| Adjustment | Range | Neutral | Status |
+```ts
+import { createEditStack, withAdjustment, migrateEditStack, serializeEditStack, EditHistory } from '@fladioarmandika/expo-photo-engine';
+
+let stack = withAdjustment(createEditStack(), 'exposure', 0.4); // clamped to the documented range
+const saved = serializeEditStack(stack);                         // stable JSON, store it anywhere
+stack = migrateEditStack(saved);                                 // validates and upgrades older versions
+
+const history = new EditHistory(stack);                          // undo/redo, one step per gesture
+history.commit(withAdjustment(stack, 'contrast', 0.15));
+history.undo();
+```
+
+| Adjustment | Range | Neutral | Rendered |
 | --- | --- | --- | --- |
 | `exposure` | -3 to 3 (EV stops, linear light) | 0 | ✅ |
-| `contrast`, `highlights`, `shadows`, `saturation`, `vibrance`, `warmth`, `tint`, `vignette` | to be finalized | 0 | planned |
-| `sharpness` | to be finalized | 0 | planned |
+| `contrast`, `highlights`, `shadows`, `saturation`, `vibrance`, `warmth`, `tint`, `vignette` | -1 to 1 | 0 | planned |
+| `sharpness` | 0 to 1 | 0 | planned |
 
-`crop` and `filter` join the stack in v1. Stacks always migrate forward, so a stack saved today
-keeps opening in later versions.
+`ADJUSTMENTS` exports these ranges (plus a step and a label) so sliders don't hard-code them.
+
+`crop` (normalized rect, 90° rotation, straighten, flips) and `filter` (LUT id + intensity) are
+already part of the format and validated; rendering them is planned. Stacks always migrate
+forward, so a stack saved today keeps opening in later versions.
 
 ## How it works
 
@@ -256,6 +279,7 @@ export + share.
 | `node scripts/check-glsl.mjs` | Runs the Android GLSL in headless Chromium (WebGL2, same shader language) on every 8-bit level at 12 exposures and compares with the JS reference. Needs `playwright-core`. |
 | `node scripts/compare-images.mjs a.png b.png [diff.png]` | Per-pixel comparison of two exports, with a diff map. |
 | `node scripts/make-parity-chart.mjs` | Regenerates the parity chart. |
+| `node scripts/check-metal.mjs` | Compiles the Metal shader source offline (macOS + Xcode). |
 
 ## License
 

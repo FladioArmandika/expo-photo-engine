@@ -2,14 +2,8 @@ import { requireNativeView } from 'expo';
 import * as React from 'react';
 import type { NativeSyntheticEvent, StyleProp, ViewStyle } from 'react-native';
 
-import type {
-  AdjustmentKey,
-  EditStack,
-  ErrorEvent,
-  LoadEvent,
-  PreviewQuality,
-  RenderStats,
-} from './types';
+import type { AdjustmentKey, EditStack } from './edit-stack/types';
+import type { ErrorEvent, LoadEvent, PreviewQuality, RenderStats } from './types';
 
 export type PhotoCanvasRef = {
   /** Updates one adjustment on the native side without a React render. Safe to call on every slider tick. */
