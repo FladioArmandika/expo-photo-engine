@@ -36,40 +36,21 @@ different on Android and iOS, and the edit is baked into the pixels.
 ## At a glance
 
 ```tsx
-import {
-  createEditStack,
-  exportImage,
-  PhotoCanvas,
-  type PhotoCanvasRef,
-} from '@fladioarmandika/expo-photo-engine';
+import { exportImage, PhotoCanvas, usePhotoEditor } from '@fladioarmandika/expo-photo-engine';
 import Slider from '@react-native-community/slider';
-import { useRef } from 'react';
 import { Button } from 'react-native';
 
 export function Editor({ uri }: { uri: string }) {
-  const canvas = useRef<PhotoCanvasRef>(null);
-  const exposure = useRef(0);
+  const editor = usePhotoEditor();
 
   return (
     <>
-      <PhotoCanvas ref={canvas} source={uri} style={{ flex: 1 }} />
-      <Slider
-        minimumValue={-3}
-        maximumValue={3}
-        onSlidingStart={() => canvas.current?.beginInteraction()}
-        // Goes straight to the GPU: no setState, no React re-render per tick.
-        onValueChange={(v) => {
-          exposure.current = v;
-          canvas.current?.setAdjustment('exposure', v);
-        }}
-        onSlidingComplete={() => canvas.current?.endInteraction()}
-      />
-      <Button
-        title="Save"
-        onPress={() =>
-          exportImage(uri, createEditStack({ adjustments: { exposure: exposure.current } }), { format: 'jpeg' })
-        }
-      />
+      <PhotoCanvas source={uri} style={{ flex: 1 }} {...editor.canvasProps} />
+      {/* Drags go straight to the GPU, no React render per tick. Each drag is one undo step. */}
+      <Slider {...editor.sliderProps('exposure')} />
+      <Slider {...editor.sliderProps('contrast')} />
+      <Button title="Undo" disabled={!editor.canUndo} onPress={editor.undo} />
+      <Button title="Save" onPress={() => exportImage(uri, editor.getEdits(), { format: 'jpeg' })} />
     </>
   );
 }
@@ -111,7 +92,7 @@ general-purpose 2D canvas.
 | Crop, 90° rotation, straighten, flip + optional `CropOverlay` | planned |
 | LUT filters with intensity, filter catalog as data, live thumbnails | planned |
 | Edit stack: types, validation, migration, undo/redo history | ✅ |
-| `usePhotoEditor` hook binding history to the canvas | planned |
+| `usePhotoEditor` hook: undo/redo, unsaved-changes flag, slider wiring | ✅ |
 | HEIC export, metadata (EXIF) preservation | planned |
 | Cross-platform golden-image tests in CI | planned |
 
@@ -161,6 +142,35 @@ A native view that renders `source` with the current edits.
 | `setAdjustment(key, value)` | Update one adjustment. Safe to call on every slider tick. |
 | `setEdits(stack)` | Replace the whole edit stack. |
 | `beginInteraction()` / `endInteraction()` | Mark a gesture. Stats are reported for the gesture window; later this also switches to a fast proxy while dragging. |
+
+### `usePhotoEditor(options?)`
+
+Keeps the edits for one photo, with undo/redo, and connects them to a `PhotoCanvas`. While a
+slider is being dragged the values go straight to the canvas and your component does not
+re-render. It re-renders when a drag ends, and on undo, redo and reset.
+
+```ts
+const editor = usePhotoEditor({
+  initialEdits: savedJson, // optional: a stack or a saved one (any version, object or JSON string)
+  historyLimit: 100,       // optional
+});
+```
+
+| Member | Description |
+| --- | --- |
+| `canvasProps` | Spread onto `<PhotoCanvas>`. |
+| `sliderProps(key)` | Range, value and callbacks for `@react-native-community/slider` (or any slider with the same callbacks). One drag = one undo step. |
+| `edits` | The committed edit stack. Save this. |
+| `getEdits()` | The edits including a drag in progress. Use this for export. |
+| `canUndo`, `canRedo`, `undo()`, `redo()` | History. |
+| `isDirty`, `markSaved()` | Unsaved changes since the start or the last `markSaved()`. |
+| `setAdjustment(key, value)` | Sets one value. Outside a gesture it is its own undo step. |
+| `beginGesture()`, `endGesture()` | Group everything in between into one undo step. Use these with your own slider or gesture code. |
+| `setCrop(crop)`, `setFilter(filter)`, `setEdits(stack)` | One undo step each. |
+| `reset(stack?)` | Start over (default: the original photo) with an empty history. |
+
+The logic lives in `PhotoEditorController`, a plain class exported too, if you want it outside
+React.
 
 ### `exportImage(source, edits, options?)`
 
@@ -263,7 +273,7 @@ node scripts/compare-images.mjs ios.png android.png diff.png
 ## Roadmap
 
 **v1:** crop/rotate/straighten with `CropOverlay`, LUT filters with
-thumbnails, `usePhotoEditor` with undo/redo, HEIC export and metadata, golden-image tests in CI.
+thumbnails, HEIC export and metadata, golden-image tests in CI.
 
 **Later:** drawing, text, stickers, custom LUT import, masks and local adjustments, RAW, web.
 
@@ -281,7 +291,7 @@ and emulators don't give meaningful GPU numbers.
 
 The example app's test screen has a photo picker, a bundled parity chart
 (`example/assets/parity-chart.png`, synthetic so JPEG decoder differences don't count), a slider
-for each adjustment, an auto-sweep that calls `setAdjustment` every frame, a stats overlay, and
+for each adjustment, undo/redo through `usePhotoEditor`, an auto-sweep that calls `setAdjustment` every frame, a stats overlay, and
 export + share.
 
 | Script | What it does |

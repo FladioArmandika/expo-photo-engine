@@ -1,0 +1,106 @@
+import { useMemo, useState, useSyncExternalStore } from 'react';
+
+import type { PhotoCanvasRef } from '../PhotoCanvas';
+import { PhotoEditorController } from './PhotoEditorController';
+import { migrateEditStack } from '../edit-stack/migrate';
+import { ADJUSTMENTS, type AdjustmentKey, type EditStack } from '../edit-stack/types';
+
+export type UsePhotoEditorOptions = {
+  /** Starting edits: a stack, or a saved one (object or JSON string) of any version. */
+  initialEdits?: EditStack | string | object;
+  /** Undo steps kept. Default 100. */
+  historyLimit?: number;
+};
+
+/** Props for @react-native-community/slider, or any slider with the same callbacks. */
+export type AdjustmentSliderProps = {
+  value: number;
+  minimumValue: number;
+  maximumValue: number;
+  step: number;
+  onSlidingStart: () => void;
+  onValueChange: (value: number) => void;
+  onSlidingComplete: () => void;
+};
+
+export type PhotoEditor = {
+  /** Spread onto <PhotoCanvas>: `<PhotoCanvas source={uri} {...editor.canvasProps} />`. */
+  canvasProps: { ref: (canvas: PhotoCanvasRef | null) => void; edits: EditStack };
+  /** The committed edits. Does not change during a drag. */
+  edits: EditStack;
+  canUndo: boolean;
+  canRedo: boolean;
+  /** True when the edits differ from the start (or from the last markSaved()). */
+  isDirty: boolean;
+  /** Ready-made slider props for one adjustment: range, live preview and one undo step per drag. */
+  sliderProps: (key: AdjustmentKey) => AdjustmentSliderProps;
+  /** The underlying controller: setAdjustment, setCrop, setFilter, undo, redo, reset, getEdits… */
+  controller: PhotoEditorController;
+} & Pick<
+  PhotoEditorController,
+  | 'setAdjustment'
+  | 'setCrop'
+  | 'setFilter'
+  | 'setEdits'
+  | 'beginGesture'
+  | 'endGesture'
+  | 'undo'
+  | 'redo'
+  | 'reset'
+  | 'markSaved'
+  | 'getEdits'
+>;
+
+/**
+ * Editor state for one photo: undo/redo, dirty tracking and live preview, wired to a PhotoCanvas.
+ * Slider drags never cause a React render; the component re-renders only when a step is
+ * committed, undone or redone.
+ */
+export function usePhotoEditor(options: UsePhotoEditorOptions = {}): PhotoEditor {
+  // Created once, like useRef, so later option changes don't wipe the history.
+  const [controller] = useState(() => {
+    const initial =
+      options.initialEdits === undefined ? undefined : migrateEditStack(options.initialEdits);
+    return new PhotoEditorController(initial, options.historyLimit);
+  });
+  const state = useSyncExternalStore(controller.subscribe, controller.getState);
+
+  return useMemo(() => {
+    const c = controller;
+    return {
+      canvasProps: { ref: c.attachCanvas, edits: state.present },
+      edits: state.present,
+      canUndo: state.canUndo,
+      canRedo: state.canRedo,
+      isDirty: state.isDirty,
+      sliderProps: (key) => ({
+        value: state.present.adjustments[key] ?? 0,
+        minimumValue: ADJUSTMENTS[key].min,
+        maximumValue: ADJUSTMENTS[key].max,
+        step: ADJUSTMENTS[key].step,
+        onSlidingStart: () => c.beginGesture(),
+        onValueChange: (value) => c.setAdjustment(key, value),
+        onSlidingComplete: () => c.endGesture(),
+      }),
+      controller: c,
+      setAdjustment: (key, value) => c.setAdjustment(key, value),
+      setCrop: (crop) => c.setCrop(crop),
+      setFilter: (filter) => c.setFilter(filter),
+      setEdits: (stack) => c.setEdits(stack),
+      beginGesture: () => c.beginGesture(),
+      endGesture: () => c.endGesture(),
+      undo: () => c.undo(),
+      redo: () => c.redo(),
+      // Ignores a non-stack argument, so `onPress={editor.reset}` doesn't pass the press event in.
+      reset: (stack) => c.reset(isEditStack(stack) ? stack : undefined),
+      markSaved: () => c.markSaved(),
+      getEdits: () => c.getEdits(),
+    };
+  }, [controller, state]);
+}
+
+function isEditStack(value: unknown): value is EditStack {
+  return (
+    typeof value === 'object' && value !== null && 'version' in value && 'adjustments' in value
+  );
+}
