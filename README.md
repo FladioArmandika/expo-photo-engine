@@ -19,9 +19,9 @@ The engine renders the live preview and the full-resolution export natively, on 
 same result on iOS and Android.
 
 > [!WARNING]
-> **Pre-alpha.** The rendering architecture is in place and being benchmarked. Today only the
-> `exposure` adjustment and PNG/JPEG export are implemented. Everything marked _planned_ below is
-> the v1 target, not shipped code. Don't use it in production yet.
+> **Pre-alpha.** The ten adjustments and PNG/JPEG export work and are being benchmarked on
+> devices. Crop and filters are not built yet. Everything marked _planned_ below is the v1 target,
+> not shipped code. Don't use it in production yet.
 
 ## Why
 
@@ -106,9 +106,8 @@ general-purpose 2D canvas.
 | `PhotoCanvas` native view, Metal (iOS) / OpenGL ES 3 (Android) | ✅ spike |
 | Imperative updates coalesced to the display refresh (60/120Hz) | ✅ spike |
 | Render stats: fps, CPU/GPU frame time, input latency, preview size | ✅ spike |
-| Exposure | ✅ spike |
+| Exposure, contrast, highlights, shadows, saturation, vibrance, warmth, tint, sharpness, vignette | ✅ |
 | Headless export (PNG, JPEG) | ✅ spike |
-| Contrast, highlights, shadows, saturation, vibrance, warmth, tint, sharpness, vignette | planned |
 | Crop, 90° rotation, straighten, flip + optional `CropOverlay` | planned |
 | LUT filters with intensity, filter catalog as data, live thumbnails | planned |
 | Edit stack: types, validation, migration, undo/redo history | ✅ |
@@ -202,13 +201,21 @@ history.commit(withAdjustment(stack, 'contrast', 0.15));
 history.undo();
 ```
 
-| Adjustment | Range | Neutral | Rendered |
-| --- | --- | --- | --- |
-| `exposure` | -3 to 3 (EV stops, linear light) | 0 | ✅ |
-| `contrast`, `highlights`, `shadows`, `saturation`, `vibrance`, `warmth`, `tint`, `vignette` | -1 to 1 | 0 | planned |
-| `sharpness` | 0 to 1 | 0 | planned |
+| Adjustment | Range | What it does |
+| --- | --- | --- |
+| `exposure` | -3 to 3 | Brightness in EV stops, applied in linear light like a camera would. |
+| `contrast` | -1 to 1 | Positive pushes towards an S-curve, negative flattens towards gray. |
+| `highlights` | -1 to 1 | Darkens (negative) or brightens (positive) the bright parts only. |
+| `shadows` | -1 to 1 | Lifts (positive) or deepens (negative) the dark parts only. |
+| `saturation` | -1 to 1 | -1 is black and white. |
+| `vibrance` | -1 to 1 | Like saturation, but mostly moves muted colors and leaves vivid ones alone. |
+| `warmth` | -1 to 1 | Blue (negative) to orange (positive). |
+| `tint` | -1 to 1 | Green (negative) to magenta (positive). |
+| `sharpness` | 0 to 1 | Unsharp mask. It works per pixel, so a downscaled preview looks a little softer than the export. |
+| `vignette` | -1 to 1 | Darkens (negative) or lightens (positive) the corners. |
 
-`ADJUSTMENTS` exports these ranges (plus a step and a label) so sliders don't hard-code them.
+0 is neutral for all of them, so an empty stack is the original photo. `ADJUSTMENTS` exports the
+ranges (plus a step and a label) so sliders don't hard-code them.
 
 `crop` (normalized rect, 90° rotation, straighten, flips) and `filter` (LUT id + intensity) are
 already part of the format and validated; rendering them is planned. Stacks always migrate
@@ -226,8 +233,11 @@ decode + EXIF orientation ─▶ proxy texture (sized to the view) ─▶ crop �
 - **Android:** `BitmapFactory` with subsampling; OpenGL ES 3 on a dedicated render thread with its
   own EGL context, drawing into a `TextureView`, driven by `Choreographer`.
 - **Same result on both:** no platform filters (Core Image, ColorMatrix) and no sRGB texture
-  formats. Both GPUs receive the same 8-bit sRGB values and run the same hand-written math: the
-  Metal and GLSL shaders are line-for-line ports, checked against a float64 JavaScript reference.
+  formats. Both GPUs receive the same 8-bit sRGB values and run the same hand-written math. The
+  adjustment code is one block of text pasted into both the Metal and the GLSL shader, CI fails if
+  the two copies differ, and the GLSL output is checked against a float64 JavaScript reference.
+- **Order:** sharpness, then exposure, white balance and vignette in linear light, then
+  highlights/shadows, contrast, saturation and vibrance on the sRGB values.
 - **Never blocks JS:** slider updates only store a value and mark the frame dirty; the native side
   draws at most once per display refresh.
 
@@ -252,7 +262,7 @@ node scripts/compare-images.mjs ios.png android.png diff.png
 
 ## Roadmap
 
-**v1:** the adjustments above, crop/rotate/straighten with `CropOverlay`, LUT filters with
+**v1:** crop/rotate/straighten with `CropOverlay`, LUT filters with
 thumbnails, `usePhotoEditor` with undo/redo, HEIC export and metadata, golden-image tests in CI.
 
 **Later:** drawing, text, stickers, custom LUT import, masks and local adjustments, RAW, web.
@@ -269,14 +279,14 @@ npx expo run:android --device --variant release
 Use release builds on real devices for performance numbers: debug JS skews them, and simulators
 and emulators don't give meaningful GPU numbers.
 
-The example app's spike screen has a photo picker, a bundled parity chart
-(`example/assets/parity-chart.png`, synthetic so JPEG decoder differences don't count), an
-exposure slider, an auto-sweep that calls `setAdjustment` every frame, a stats overlay, and
+The example app's test screen has a photo picker, a bundled parity chart
+(`example/assets/parity-chart.png`, synthetic so JPEG decoder differences don't count), a slider
+for each adjustment, an auto-sweep that calls `setAdjustment` every frame, a stats overlay, and
 export + share.
 
 | Script | What it does |
 | --- | --- |
-| `node scripts/check-glsl.mjs` | Runs the Android GLSL in headless Chromium (WebGL2, same shader language) on every 8-bit level at 12 exposures and compares with the JS reference. Needs `playwright-core`. |
+| `node scripts/check-glsl.mjs` | Checks that iOS and Android share the same adjustment code, then runs the Android GLSL in headless Chromium (WebGL2, same shader language) on a test image for every adjustment and compares each pixel with the JS reference. Needs `playwright-core`. |
 | `node scripts/compare-images.mjs a.png b.png [diff.png]` | Per-pixel comparison of two exports, with a diff map. |
 | `node scripts/make-parity-chart.mjs` | Regenerates the parity chart. |
 | `node scripts/check-metal.mjs` | Compiles the Metal shader source offline (macOS + Xcode). |

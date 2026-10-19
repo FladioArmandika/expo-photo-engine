@@ -108,15 +108,12 @@ final class PhotoCanvasView: ExpoView {
   }
 
   func setEdits(_ edits: EditStackRecord) {
-    params.exposure = Float(edits.adjustments["exposure"] ?? 0)
+    params = ShaderParams(adjustments: edits.adjustments)
     markInput()
   }
 
   func setAdjustment(_ key: String, _ value: Double) {
-    switch key {
-    case "exposure": params.exposure = Float(value)
-    default: return
-    }
+    guard params.set(key, value) else { return }
     markInput()
   }
 

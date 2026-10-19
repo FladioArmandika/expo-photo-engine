@@ -56,7 +56,7 @@ internal class GlPhotoProgram {
     GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, filter)
     GLES30.glUniform1i(uImage, 0)
     GLES30.glUniform4f(uVParams, scaleX, scaleY, if (flipY) 1f else 0f, 0f)
-    GLES30.glUniform4f(uParams, params.exposure, 0f, 0f, 0f)
+    GLES30.glUniform4fv(uParams, 3, params.values, 0)
     GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
   }
 
@@ -107,5 +107,32 @@ internal class GlPhotoProgram {
   }
 }
 
-/** Parameters the fragment shader reads. Mirrors `uParams` in Shaders.kt. */
-internal data class ShaderParams(val exposure: Float = 0f)
+/**
+ * Adjustment values the fragment shader reads, keyed like `AdjustmentKey` in src/edit-stack/types.ts.
+ * Unknown keys are ignored, missing ones are neutral (0). Immutable, so the render thread can read
+ * one while the main thread builds the next.
+ */
+internal class ShaderParams private constructor(val values: FloatArray) {
+  constructor() : this(FloatArray(12))
+
+  constructor(adjustments: Map<String, Double>) : this(
+    FloatArray(12).also { values ->
+      for ((key, value) in adjustments) SLOTS[key]?.let { values[it] = value.toFloat() }
+    }
+  )
+
+  /** Returns a copy with [key] changed, or null for a key the shader doesn't know. */
+  fun with(key: String, value: Double): ShaderParams? {
+    val slot = SLOTS[key] ?: return null
+    return ShaderParams(values.copyOf().also { it[slot] = value.toFloat() })
+  }
+
+  companion object {
+    /** Slot of each key in `uParams[3]`. Mirrors applyAdjustments in Shaders.kt. */
+    private val SLOTS = mapOf(
+      "exposure" to 0, "contrast" to 1, "highlights" to 2, "shadows" to 3,
+      "saturation" to 4, "vibrance" to 5, "warmth" to 6, "tint" to 7,
+      "sharpness" to 8, "vignette" to 9,
+    )
+  }
+}

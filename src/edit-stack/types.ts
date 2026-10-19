@@ -31,15 +31,15 @@ export type AdjustmentInfo = {
 
 export const ADJUSTMENTS: Readonly<Record<AdjustmentKey, Readonly<AdjustmentInfo>>> = {
   exposure: { min: -3, max: 3, default: 0, step: 0.01, label: 'Exposure', implemented: true },
-  contrast: { min: -1, max: 1, default: 0, step: 0.01, label: 'Contrast', implemented: false },
-  highlights: { min: -1, max: 1, default: 0, step: 0.01, label: 'Highlights', implemented: false },
-  shadows: { min: -1, max: 1, default: 0, step: 0.01, label: 'Shadows', implemented: false },
-  saturation: { min: -1, max: 1, default: 0, step: 0.01, label: 'Saturation', implemented: false },
-  vibrance: { min: -1, max: 1, default: 0, step: 0.01, label: 'Vibrance', implemented: false },
-  warmth: { min: -1, max: 1, default: 0, step: 0.01, label: 'Warmth', implemented: false },
-  tint: { min: -1, max: 1, default: 0, step: 0.01, label: 'Tint', implemented: false },
-  sharpness: { min: 0, max: 1, default: 0, step: 0.01, label: 'Sharpness', implemented: false },
-  vignette: { min: -1, max: 1, default: 0, step: 0.01, label: 'Vignette', implemented: false },
+  contrast: { min: -1, max: 1, default: 0, step: 0.01, label: 'Contrast', implemented: true },
+  highlights: { min: -1, max: 1, default: 0, step: 0.01, label: 'Highlights', implemented: true },
+  shadows: { min: -1, max: 1, default: 0, step: 0.01, label: 'Shadows', implemented: true },
+  saturation: { min: -1, max: 1, default: 0, step: 0.01, label: 'Saturation', implemented: true },
+  vibrance: { min: -1, max: 1, default: 0, step: 0.01, label: 'Vibrance', implemented: true },
+  warmth: { min: -1, max: 1, default: 0, step: 0.01, label: 'Warmth', implemented: true },
+  tint: { min: -1, max: 1, default: 0, step: 0.01, label: 'Tint', implemented: true },
+  sharpness: { min: 0, max: 1, default: 0, step: 0.01, label: 'Sharpness', implemented: true },
+  vignette: { min: -1, max: 1, default: 0, step: 0.01, label: 'Vignette', implemented: true },
 };
 
 export type CropRotation = 0 | 90 | 180 | 270;

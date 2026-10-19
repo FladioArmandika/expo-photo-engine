@@ -20,7 +20,7 @@ public class ExpoPhotoEngineModule: Module {
       guard let renderer = PhotoRenderer.shared else {
         throw PhotoEngineError.noMetalDevice
       }
-      let params = ShaderParams(exposure: Float(edits.adjustments["exposure"] ?? 0))
+      let params = ShaderParams(adjustments: edits.adjustments)
       return try renderer.export(
         source: source, params: params, format: options.format, quality: options.quality,
         maxDimension: options.maxDimension)

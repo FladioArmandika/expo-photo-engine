@@ -1,7 +1,12 @@
 import {
+  ADJUSTMENT_KEYS,
+  ADJUSTMENTS,
   createEditStack,
   exportImage,
   PhotoCanvas,
+  withAdjustment,
+  type AdjustmentKey,
+  type EditStack,
   type ExportResult,
   type LoadEvent,
   type PhotoCanvasRef,
@@ -14,13 +19,16 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Sharing from 'expo-sharing';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-// Spike screen: one adjustment (exposure) rendered by the native shader, driven through the
-// imperative ref so slider ticks never cause a React render.
+// Test screen: every adjustment rendered by the native shader, driven through the imperative
+// ref so slider ticks never cause a React render. The edit stack lives in a ref for the same reason.
 export default function App() {
   const canvas = useRef<PhotoCanvasRef>(null);
-  const exposure = useRef(0);
+  const edits = useRef<EditStack>(createEditStack());
+  const [active, setActive] = useState<AdjustmentKey>('exposure');
+  // Bumped on reset so the slider remounts at its new value.
+  const [revision, setRevision] = useState(0);
   const [source, setSource] = useState<string | null>(null);
   const [quality, setQuality] = useState<PreviewQuality>('auto');
   const [load, setLoad] = useState<LoadEvent | null>(null);
@@ -29,22 +37,33 @@ export default function App() {
   const [exported, setExported] = useState<ExportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Auto-sweep exposure every frame from JS (the "stress test" input), no hands needed.
+  const setValue = (key: AdjustmentKey, value: number) => {
+    edits.current = withAdjustment(edits.current, key, value);
+    canvas.current?.setAdjustment(key, value);
+  };
+
+  const resetEdits = () => {
+    edits.current = createEditStack();
+    canvas.current?.setEdits(edits.current);
+    setRevision((r) => r + 1);
+  };
+
+  // Auto-sweep the selected adjustment every frame from JS (the "stress test" input), no hands needed.
   useEffect(() => {
     if (!sweeping) return;
     canvas.current?.beginInteraction();
+    const { min, max } = ADJUSTMENTS[active];
     const start = performance.now();
     let frame = requestAnimationFrame(function tick(now) {
-      const value = Math.sin((now - start) / 600) * 2;
-      exposure.current = value;
-      canvas.current?.setAdjustment('exposure', value);
+      const t = (Math.sin((now - start) / 600) + 1) / 2;
+      setValue(active, min + (max - min) * (min < 0 ? 0.15 + t * 0.7 : t));
       frame = requestAnimationFrame(tick);
     });
     return () => {
       cancelAnimationFrame(frame);
       canvas.current?.endInteraction();
     };
-  }, [sweeping]);
+  }, [sweeping, active]);
 
   const pickPhoto = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -64,6 +83,8 @@ export default function App() {
   };
 
   const reset = (uri: string) => {
+    edits.current = createEditStack();
+    setRevision((r) => r + 1);
     setSource(uri);
     setLoad(null);
     setStats(null);
@@ -75,11 +96,7 @@ export default function App() {
     if (!source) return;
     setExported(null);
     try {
-      const result = await exportImage(
-        source,
-        createEditStack({ adjustments: { exposure: exposure.current } }),
-        { format: 'png', maxDimension: 0 }
-      );
+      const result = await exportImage(source, edits.current, { format: 'png', maxDimension: 0 });
       setExported(result);
     } catch (e) {
       setError(String(e));
@@ -126,17 +143,24 @@ export default function App() {
         </View>
       </View>
 
-      <Text style={styles.label}>Exposure (EV)</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+        {ADJUSTMENT_KEYS.map((key) => (
+          <Pressable
+            key={key}
+            style={[styles.chip, key === active && styles.chipActive]}
+            onPress={() => setActive(key)}>
+            <Text style={styles.chipText}>{ADJUSTMENTS[key].label}</Text>
+          </Pressable>
+        ))}
+      </ScrollView>
       <Slider
+        key={`${active}-${revision}`}
         style={styles.slider}
-        minimumValue={-3}
-        maximumValue={3}
-        value={0}
+        minimumValue={ADJUSTMENTS[active].min}
+        maximumValue={ADJUSTMENTS[active].max}
+        value={edits.current.adjustments[active] ?? 0}
         onSlidingStart={() => canvas.current?.beginInteraction()}
-        onValueChange={(value) => {
-          exposure.current = value;
-          canvas.current?.setAdjustment('exposure', value);
-        }}
+        onValueChange={(value) => setValue(active, value)}
         onSlidingComplete={() => canvas.current?.endInteraction()}
       />
 
@@ -145,12 +169,13 @@ export default function App() {
           title={sweeping ? 'Stop sweep' : 'Auto-sweep'}
           onPress={() => setSweeping((s) => !s)}
         />
+        <Button title="Reset" onPress={resetEdits} />
         <Button title="Export PNG" onPress={runExport} />
         {exported && <Button title="Share" onPress={() => Sharing.shareAsync(exported.uri)} />}
       </View>
       {exported && (
         <Text style={styles.info}>
-          Exported {exported.width}x{exported.height} at EV {exposure.current.toFixed(2)} in{' '}
+          Exported {exported.width}x{exported.height} in{' '}
           {exported.totalMs.toFixed(0)}ms (render {exported.renderMs.toFixed(1)}ms)
         </Text>
       )}
@@ -200,7 +225,15 @@ const styles = StyleSheet.create({
     fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
     fontSize: 12,
   },
-  label: { color: '#ddd', marginBottom: 4 },
+  chips: { gap: 6, paddingBottom: 4 },
+  chip: {
+    backgroundColor: '#1d1d20',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+  },
+  chipActive: { backgroundColor: '#3b3b42' },
+  chipText: { color: '#eee', fontSize: 13 },
   slider: { width: '100%', height: 40 },
   button: {
     backgroundColor: '#2a2a2e',

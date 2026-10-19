@@ -123,10 +123,7 @@ class PhotoCanvasView(context: Context, appContext: AppContext) :
   }
 
   fun setAdjustment(key: String, value: Double) {
-    params = when (key) {
-      "exposure" -> params.copy(exposure = value.toFloat())
-      else -> return
-    }
+    params = params.with(key, value) ?: return
     markInput()
   }
 
