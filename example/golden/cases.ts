@@ -19,6 +19,22 @@ export const GOLDEN_CASES: { name: string; edits: EditStack }[] = [
     edits: createEditStack({ filter: { id: filter.id, intensity: 1 } }),
   })),
   {
+    name: 'hsl-hue',
+    edits: createEditStack({ hsl: { red: { hue: 1 }, green: { hue: -0.7 }, blue: { hue: 0.5 } } }),
+  },
+  {
+    name: 'hsl-saturation',
+    edits: createEditStack({
+      hsl: { orange: { saturation: 0.8 }, aqua: { saturation: -1 }, magenta: { saturation: -0.5 } },
+    }),
+  },
+  {
+    name: 'hsl-luminance',
+    edits: createEditStack({
+      hsl: { yellow: { luminance: 0.9 }, blue: { luminance: -0.9 }, purple: { luminance: 0.5 } },
+    }),
+  },
+  {
     name: 'crop-rotate-flip',
     edits: createEditStack({
       crop: createCrop({ rect: [0.1, 0.2, 0.5, 0.6], rotation: 90, flipH: true }),
@@ -45,6 +61,7 @@ export const GOLDEN_CASES: { name: string; edits: EditStack }[] = [
         vignette: -0.35,
       },
       filter: { id: 'film', intensity: 0.7 },
+      hsl: { blue: { luminance: -0.4 }, orange: { saturation: 0.3 } },
     }),
   },
 ];

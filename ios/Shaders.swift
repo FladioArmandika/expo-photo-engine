@@ -147,6 +147,62 @@ vec3 applyAdjustments(vec3 srgb, vec3 blur, vec2 uv, float aspect, vec4 p0, vec4
   c = luma + (c - luma) * (1.0 + p1.y * (1.0 - chroma));
   return clamp(c, 0.0, 1.0);
 }
+// HSL: hue, saturation and luminance per color range, seven vec4s packed by
+// src/edit-stack/hsl.ts. h0.x = 1 when anything is set. h1, h2 = hue, h3, h4 = saturation and
+// h5, h6 = luminance, for red, orange, yellow, green (first vec4) and aqua, blue, purple,
+// magenta (second vec4).
+
+// How much a hue (degrees) belongs to the range centered on `center`. Each range fades out
+// towards its neighbours' centers, `before` and `after` degrees away, and two neighbouring
+// weights always add up to 1, so every hue is fully covered.
+float hslWeight(float hue, float center, float before, float after) {
+  float d = hue - center;
+  if (d > 180.0) { d -= 360.0; }
+  if (d < -180.0) { d += 360.0; }
+  float t = clamp(d < 0.0 ? 1.0 + d / before : 1.0 - d / after, 0.0, 1.0);
+  return t * t * (3.0 - 2.0 * t);
+}
+
+vec3 applyHsl(vec3 c, vec4 h1, vec4 h2, vec4 h3, vec4 h4, vec4 h5, vec4 h6) {
+  float top = max(c.r, max(c.g, c.b));
+  float delta = top - min(c.r, min(c.g, c.b));
+  // Grays have no hue, so nothing to change.
+  if (delta < 0.00001) { return c; }
+  float hue = 0.0;
+  if (top == c.r) {
+    hue = (c.g - c.b) / delta;
+    if (hue < 0.0) { hue += 6.0; }
+  } else if (top == c.g) {
+    hue = (c.b - c.r) / delta + 2.0;
+  } else {
+    hue = (c.r - c.g) / delta + 4.0;
+  }
+  hue *= 60.0;
+  float sat = delta / top;
+
+  vec4 wA = vec4(hslWeight(hue, 0.0, 60.0, 30.0), hslWeight(hue, 30.0, 30.0, 30.0),
+                 hslWeight(hue, 60.0, 30.0, 60.0), hslWeight(hue, 120.0, 60.0, 60.0));
+  vec4 wB = vec4(hslWeight(hue, 180.0, 60.0, 60.0), hslWeight(hue, 240.0, 60.0, 30.0),
+                 hslWeight(hue, 270.0, 30.0, 30.0), hslWeight(hue, 300.0, 30.0, 60.0));
+  float hueShift = dot(wA, h1) + dot(wB, h2);
+  float satShift = dot(wA, h3) + dot(wB, h4);
+  float lumShift = dot(wA, h5) + dot(wB, h6);
+
+  // Hue turns up to 30 degrees towards the neighbouring color. Saturation scales the color's
+  // strength. Both rebuild the pixel from hue, saturation and value (its brightest channel).
+  float h = (hue + hueShift * 30.0) / 60.0;
+  float s = clamp(sat * (1.0 + satShift), 0.0, 1.0);
+  vec3 k = vec3(5.0, 3.0, 1.0) + h;
+  k = k - 6.0 * floor(k / 6.0);
+  vec3 rgb = top - top * s * clamp(min(k, 4.0 - k), 0.0, 1.0);
+
+  // Luminance moves the color towards white or black. It is scaled by the original saturation,
+  // so near-grays (whose hue is mostly noise) barely change.
+  float amount = lumShift * sat * 0.5;
+  rgb = amount > 0.0 ? rgb + (1.0 - rgb) * amount : rgb * (1.0 + amount);
+  return clamp(rgb, 0.0, 1.0);
+}
+
 // Filters: a fixed look on top of the adjustments, eight vec4s packed by src/filters/looks.ts.
 // f0, f1, f2 = channel mixer rows (xyz), with intensity in f0.w, saturation in f1.w and
 // contrast in f2.w. f3, f4, f5 = slope, offset and power (the ASC CDL formula).
@@ -188,7 +244,7 @@ float4 sampleImage(texture2d<float> image, float2 uv) {
 }
 
 // params[0..2] = p0, p1, p2 of applyAdjustments (params[2].z is the output's width / height),
-// params[3..10] = f0..f7 of applyFilter.
+// params[3..10] = f0..f7 of applyFilter, params[11..17] = h0..h6 of applyHsl.
 fragment float4 photo_fragment(VertexOut in [[stage_in]],
                                texture2d<float> image [[texture(0)]],
                                constant float4 *params [[buffer(0)]]) {
@@ -205,6 +261,9 @@ fragment float4 photo_fragment(VertexOut in [[stage_in]],
   }
   float3 edited = applyAdjustments(
     color.rgb, blur, in.uv, params[2].z, params[0], params[1], params[2]);
+  if (params[11].x > 0.0) {
+    edited = applyHsl(edited, params[12], params[13], params[14], params[15], params[16], params[17]);
+  }
   if (params[3].w > 0.0) {
     edited = applyFilter(
       edited, params[3], params[4], params[5], params[6], params[7], params[8], params[9], params[10]);

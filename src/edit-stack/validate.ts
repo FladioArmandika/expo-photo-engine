@@ -1,4 +1,11 @@
 import {
+  HSL_CHANNELS,
+  HSL_COLORS,
+  type HslAdjustments,
+  type HslChannel,
+  type HslColor,
+} from './hsl';
+import {
   ADJUSTMENT_KEYS,
   ADJUSTMENTS,
   CURRENT_EDIT_STACK_VERSION,
@@ -54,15 +61,54 @@ export function validateEditStack(input: unknown): ValidationResult {
   const adjustments = validateAdjustments(input.adjustments, errors, warnings);
   const crop = input.crop == null ? null : validateCrop(input.crop, errors, warnings);
   const filter = input.filter == null ? null : validateFilter(input.filter, errors, warnings);
+  const hsl = input.hsl == null ? {} : validateHsl(input.hsl, errors, warnings);
 
   for (const key of Object.keys(input)) {
-    if (!['version', 'adjustments', 'crop', 'filter'].includes(key)) {
+    if (!['version', 'adjustments', 'crop', 'filter', 'hsl'].includes(key)) {
       warnings.push(`dropped unknown field "${key}"`);
     }
   }
 
   if (errors.length > 0) return { ok: false, errors };
-  return { ok: true, value: { version: 1, crop, adjustments, filter }, warnings };
+  const value: EditStack = { version: 1, crop, adjustments, filter };
+  if (Object.keys(hsl).length > 0) value.hsl = hsl;
+  return { ok: true, value, warnings };
+}
+
+function validateHsl(input: unknown, errors: string[], warnings: string[]): HslAdjustments {
+  const result: HslAdjustments = {};
+  if (!isRecord(input)) {
+    errors.push('hsl must be an object');
+    return result;
+  }
+  for (const [color, shift] of Object.entries(input)) {
+    if (!(HSL_COLORS as readonly string[]).includes(color)) {
+      warnings.push(`dropped unknown hsl color "${color}"`);
+      continue;
+    }
+    if (!isRecord(shift)) {
+      errors.push(`hsl.${color} must be an object`);
+      continue;
+    }
+    const kept: Partial<Record<HslChannel, number>> = {};
+    for (const [channel, value] of Object.entries(shift)) {
+      if (!(HSL_CHANNELS as readonly string[]).includes(channel)) {
+        warnings.push(`dropped unknown hsl channel "${color}.${channel}"`);
+        continue;
+      }
+      if (!isFiniteNumber(value)) {
+        errors.push(`hsl.${color}.${channel} must be a finite number`);
+        continue;
+      }
+      const clamped = clamp(value, -1, 1);
+      if (clamped !== value) {
+        warnings.push(`hsl.${color}.${channel} clamped from ${value} to ${clamped}`);
+      }
+      if (clamped !== 0) kept[channel as HslChannel] = clamped;
+    }
+    if (Object.keys(kept).length > 0) result[color as HslColor] = kept;
+  }
+  return result;
 }
 
 function validateAdjustments(input: unknown, errors: string[], warnings: string[]): Adjustments {

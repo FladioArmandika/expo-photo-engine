@@ -3,6 +3,7 @@ import { useMemo, useState, useSyncExternalStore } from 'react';
 import type { PhotoCanvasRef } from '../PhotoCanvas';
 import { PhotoEditorController } from './PhotoEditorController';
 import type { CropOverlayProps } from '../crop/CropOverlay';
+import type { HslChannel, HslColor } from '../edit-stack/hsl';
 import { migrateEditStack } from '../edit-stack/migrate';
 import { ADJUSTMENTS, type AdjustmentKey, type EditStack } from '../edit-stack/types';
 
@@ -50,6 +51,8 @@ export type PhotoEditor = {
   >;
   /** Slider props for the current filter's intensity, 0..1. */
   filterSliderProps: () => AdjustmentSliderProps;
+  /** Slider props for one color's hue, saturation or luminance, -1..1. One drag = one undo step. */
+  hslSliderProps: (color: HslColor, channel: HslChannel) => AdjustmentSliderProps;
   /** The underlying controller: setAdjustment, setCrop, setFilter, undo, redo, reset, getEdits… */
   controller: PhotoEditorController;
 } & Pick<
@@ -59,6 +62,7 @@ export type PhotoEditor = {
   | 'setFilter'
   | 'setCropping'
   | 'setFilterIntensity'
+  | 'setHsl'
   | 'setEdits'
   | 'update'
   | 'beginGesture'
@@ -119,12 +123,22 @@ export function usePhotoEditor(options: UsePhotoEditorOptions = {}): PhotoEditor
         onValueChange: (value) => c.setFilterIntensity(value),
         onSlidingComplete: () => c.endGesture(),
       }),
+      hslSliderProps: (color, channel) => ({
+        value: state.present.hsl?.[color]?.[channel] ?? 0,
+        minimumValue: -1,
+        maximumValue: 1,
+        step: 0.01,
+        onSlidingStart: () => c.beginGesture(),
+        onValueChange: (value) => c.setHsl(color, channel, value),
+        onSlidingComplete: () => c.endGesture(),
+      }),
       controller: c,
       setAdjustment: (key, value) => c.setAdjustment(key, value),
       setCrop: (crop) => c.setCrop(crop),
       setFilter: (filter) => c.setFilter(filter),
       setCropping: (cropping) => c.setCropping(cropping),
       setFilterIntensity: (intensity) => c.setFilterIntensity(intensity),
+      setHsl: (color, channel, value) => c.setHsl(color, channel, value),
       setEdits: (stack) => c.setEdits(stack),
       update: (change) => c.update(change),
       beginGesture: () => c.beginGesture(),
