@@ -16,6 +16,7 @@ process.removeAllListeners('warning');
 const { BUILT_IN_FILTERS } = await import('../src/filters/catalog.ts');
 const { packLook } = await import('../src/filters/looks.ts');
 const { packHsl } = await import('../src/edit-stack/hsl.ts');
+const { packCurves } = await import('../src/edit-stack/curves.ts');
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const kotlin = read('android/src/main/java/expo/modules/photoengine/Shaders.kt');
@@ -175,6 +176,19 @@ function applyHsl(c, h) {
   return rgb.map(clamp01);
 }
 
+// Line for line with curveAt and applyCurves. k is the 136 numbers from packCurves.
+function curveAt(k, x, channel) {
+  const pos = clamp01(x) * 32;
+  const i = Math.min(Math.floor(pos), 31);
+  const a = k[(1 + i) * 4 + channel];
+  const b = k[(2 + i) * 4 + channel];
+  return a + (b - a) * (pos - i);
+}
+function applyCurves(c, k) {
+  const rgb = c.map((v) => curveAt(k, v, 0));
+  return rgb.map((v, ch) => curveAt(k, v, ch + 1));
+}
+
 // ---- test image: smooth gradients plus pseudo-random colors, wider than tall ----
 
 const W = 48;
@@ -278,6 +292,27 @@ const cases = [
     filter: packLook(BUILT_IN_FILTERS[1].look, 0.7),
     contrast: 0.3,
   },
+  // Tone curves.
+  { name: 'curves invert', curves: { rgb: [[0, 1], [1, 0]] } },
+  { name: 'curves s-curve', curves: { rgb: [[0, 0], [0.25, 0.18], [0.75, 0.84], [1, 1]] } },
+  { name: 'curves faded blacks', curves: { rgb: [[0, 0.12], [0.5, 0.52], [1, 0.95]] } },
+  { name: 'curves red only', curves: { red: [[0, 0], [0.5, 0.7], [1, 1]] } },
+  {
+    name: 'curves all channels',
+    curves: {
+      rgb: [[0, 0.05], [0.4, 0.35], [1, 1]],
+      red: [[0, 0], [0.6, 0.7], [1, 1]],
+      green: [[0.1, 0], [0.9, 1]],
+      blue: [[0, 0.1], [0.5, 0.45], [1, 0.9]],
+    },
+  },
+  {
+    name: 'curves + hsl + filter',
+    curves: { rgb: [[0, 0], [0.3, 0.25], [0.7, 0.78], [1, 1]] },
+    hsl: { orange: { saturation: 0.4 } },
+    filter: packLook(BUILT_IN_FILTERS[2].look, 0.6),
+    exposure: 0.2,
+  },
   {
     name: 'filter + adjustments + crop',
     filter: packLook(BUILT_IN_FILTERS[0].look, 0.8),
@@ -290,6 +325,7 @@ const cases = [
   crop: { ...noCrop, ...c.crop },
   filter: c.filter ?? packLook({}, 0),
   hsl: packHsl(c.hsl),
+  curves: packCurves(c.curves),
 }));
 
 const prepared = cases.map((c) => {
@@ -369,6 +405,7 @@ const results = await page.evaluate(
       gl.uniform4fv(gl.getUniformLocation(program, 'uParams'), new Float32Array(c.params));
       gl.uniform4fv(gl.getUniformLocation(program, 'uFilter'), new Float32Array(c.filter));
       gl.uniform4fv(gl.getUniformLocation(program, 'uHsl'), new Float32Array(c.hsl));
+      gl.uniform4fv(gl.getUniformLocation(program, 'uCurves'), new Float32Array(c.curves));
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       const px = new Uint8Array(c.ow * c.oh * 4);
       gl.readPixels(0, 0, c.ow, c.oh, gl.RGBA, gl.UNSIGNED_BYTE, px);
@@ -402,7 +439,8 @@ prepared.forEach((a, n) => {
           4
       );
       const adjusted = applyAdjustments(center, blur, uv, ow / oh, a);
-      const toned = a.hsl[0] > 0 ? applyHsl(adjusted, a.hsl) : adjusted;
+      const curved = a.curves[0] > 0 ? applyCurves(adjusted, a.curves) : adjusted;
+      const toned = a.hsl[0] > 0 ? applyHsl(curved, a.hsl) : curved;
       const expected = a.filter[3] > 0 ? applyFilter(toned, a.filter) : toned;
       for (let ch = 0; ch < 3; ch++) {
         const d = Math.abs(got[(y * ow + x) * 4 + ch] - Math.round(expected[ch] * 255));
@@ -444,6 +482,19 @@ for (const [name, x, y, sx, sy, meaning] of known) {
   if (pixelAt(name, x, y) !== sourceAt(sx, sy)) {
     console.error(`${name}: wrong pixel at (${x}, ${y}); ${meaning}`);
     worst = Infinity;
+  }
+}
+
+// An inverting curve turns every pixel into its negative.
+{
+  const px = results.out[prepared.findIndex((a) => a.name === 'curves invert')];
+  const neutralPx = results.out[0];
+  for (let i = 0; i < px.length; i += 4) {
+    if ([0, 1, 2].some((ch) => Math.abs(px[i + ch] - (255 - neutralPx[i + ch])) > 1)) {
+      console.error(`curves invert: pixel ${i / 4} is not the negative of the original`);
+      worst = Infinity;
+      break;
+    }
   }
 }
 

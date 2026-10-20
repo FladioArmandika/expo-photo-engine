@@ -1,3 +1,4 @@
+import { isCurvesNeutral } from './curves';
 import { isHslNeutral } from './hsl';
 import { serializeEditStack } from './migrate';
 import type { AdjustmentKey, Crop, EditStack, FilterRef } from './types';
@@ -12,6 +13,7 @@ export function createEditStack(init: Partial<Omit<EditStack, 'version'>> = {}):
     filter: init.filter ?? null,
   };
   if (!isHslNeutral(init.hsl)) stack.hsl = init.hsl;
+  if (!isCurvesNeutral(init.curves)) stack.curves = init.curves;
   return stack;
 }
 
@@ -116,7 +118,9 @@ export function isNeutral(stack: EditStack): boolean {
       c.rect[1] === 0 &&
       c.rect[2] === 1 &&
       c.rect[3] === 1);
-  return noAdjustments && noFilter && noCrop && isHslNeutral(stack.hsl);
+  return (
+    noAdjustments && noFilter && noCrop && isHslNeutral(stack.hsl) && isCurvesNeutral(stack.curves)
+  );
 }
 
 export function editStacksEqual(a: EditStack, b: EditStack): boolean {

@@ -81,7 +81,8 @@ void main() {
 """
 
   // uParams[0..2] = p0, p1, p2 of applyAdjustments (uParams[2].z is the output's width / height),
-  // uFilter[0..7] = f0..f7 of applyFilter, uHsl[0..6] = h0..h6 of applyHsl.
+  // uFilter[0..7] = f0..f7 of applyFilter, uHsl[0..6] = h0..h6 of applyHsl, uCurves = see
+  // applyCurves.
   const val FRAGMENT = """#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -90,6 +91,7 @@ uniform sampler2D uImage;
 uniform vec4 uParams[3];
 uniform vec4 uFilter[8];
 uniform vec4 uHsl[7];
+uniform vec4 uCurves[34];
 out vec4 fragColor;
 
 vec3 srgbToLinear(vec3 c) {
@@ -229,6 +231,22 @@ vec3 applyFilter(vec3 c, vec4 f0, vec4 f1, vec4 f2, vec4 f3, vec4 f4, vec4 f5, v
 }
 // END SHARED ADJUSTMENTS
 
+// Tone curves, packed by packCurves in src/edit-stack/curves.ts: uCurves[0].x = 1 when any curve
+// is set, then uCurves[1 + k] holds the rgb, red, green and blue curves (x, y, z, w) at input
+// k / 32. In between, the samples are blended linearly. Not in the shared block because Metal
+// reads the samples through a pointer instead of a uniform array.
+// Mirrors applyCurves in ios/Shaders.swift.
+float curveAt(float x, int channel) {
+  float pos = clamp(x, 0.0, 1.0) * 32.0;
+  int i = min(int(pos), 31);
+  return mix(uCurves[1 + i][channel], uCurves[2 + i][channel], pos - float(i));
+}
+
+vec3 applyCurves(vec3 c) {
+  c = vec3(curveAt(c.r, 0), curveAt(c.g, 0), curveAt(c.b, 0));
+  return vec3(curveAt(c.r, 1), curveAt(c.g, 2), curveAt(c.b, 3));
+}
+
 // Bilinear read done in the shader instead of by the GPU's sampler. Every GPU blends with its own
 // weight precision, which made straightened crops differ by a few levels on hard edges between
 // iOS and Android. Here the weights are rounded to 1/256 the same way on both, and at a pixel
@@ -263,6 +281,9 @@ void main() {
   }
   vec3 edited = applyAdjustments(
     color.rgb, blur, vUv, uParams[2].z, uParams[0], uParams[1], uParams[2]);
+  if (uCurves[0].x > 0.0) {
+    edited = applyCurves(edited);
+  }
   if (uHsl[0].x > 0.0) {
     edited = applyHsl(edited, uHsl[1], uHsl[2], uHsl[3], uHsl[4], uHsl[5], uHsl[6]);
   }

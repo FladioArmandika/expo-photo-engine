@@ -35,6 +35,40 @@ export const GOLDEN_CASES: { name: string; edits: EditStack }[] = [
     }),
   },
   {
+    name: 'curves-rgb',
+    edits: createEditStack({
+      curves: {
+        rgb: [
+          [0, 0.08],
+          [0.25, 0.18],
+          [0.75, 0.85],
+          [1, 0.96],
+        ],
+      },
+    }),
+  },
+  {
+    name: 'curves-channels',
+    edits: createEditStack({
+      curves: {
+        red: [
+          [0, 0],
+          [0.5, 0.62],
+          [1, 1],
+        ],
+        green: [
+          [0, 0.05],
+          [1, 0.95],
+        ],
+        blue: [
+          [0, 0.15],
+          [0.5, 0.45],
+          [1, 0.9],
+        ],
+      },
+    }),
+  },
+  {
     name: 'crop-rotate-flip',
     edits: createEditStack({
       crop: createCrop({ rect: [0.1, 0.2, 0.5, 0.6], rotation: 90, flipH: true }),
@@ -62,6 +96,14 @@ export const GOLDEN_CASES: { name: string; edits: EditStack }[] = [
       },
       filter: { id: 'film', intensity: 0.7 },
       hsl: { blue: { luminance: -0.4 }, orange: { saturation: 0.3 } },
+      curves: {
+        rgb: [
+          [0, 0],
+          [0.3, 0.26],
+          [0.7, 0.76],
+          [1, 1],
+        ],
+      },
     }),
   },
 ];
