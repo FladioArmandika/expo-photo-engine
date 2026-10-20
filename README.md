@@ -88,6 +88,7 @@ general-purpose 2D canvas.
 | Imperative updates coalesced to the display refresh (60/120Hz) | ✅ spike |
 | Render stats: fps, CPU/GPU frame time, input latency, preview size | ✅ spike |
 | Exposure, contrast, highlights, shadows, saturation, vibrance, warmth, tint, sharpness, vignette | ✅ |
+| HSL: hue, saturation and luminance for 8 color ranges | ✅ |
 | Headless export (PNG, JPEG, HEIC) | ✅ |
 | Crop, 90° rotation, straighten, flip | ✅ |
 | Optional `CropOverlay` with drag handles and aspect lock | ✅ |
@@ -173,6 +174,7 @@ const editor = usePhotoEditor({
 | `setAdjustment(key, value)` | Sets one value. Outside a gesture it is its own undo step. |
 | `beginGesture()`, `endGesture()` | Group everything in between into one undo step. Use these with your own slider or gesture code. |
 | `filterSliderProps()` | Slider props for the current filter's intensity. |
+| `hslSliderProps(color, channel)`, `setHsl(color, channel, value)` | One HSL value, -1 to 1. One drag = one undo step. |
 | `setCrop(crop)`, `setFilter(filter)`, `setEdits(stack)` | One undo step each. |
 | `setCropping(on)`, `cropping` | Crop editing mode: the canvas shows the whole photo so a `CropOverlay` can sit on top. |
 | `cropOverlayProps(photo)` | Spread onto `<CropOverlay>`, with `photo` = the `onLoad` event (or any `{ sourceWidth, sourceHeight }`). One drag = one undo step. |
@@ -245,6 +247,30 @@ history.undo();
 
 0 is neutral for all of them, so an empty stack is the original photo. `ADJUSTMENTS` exports the
 ranges (plus a step and a label) so sliders don't hard-code them.
+
+#### HSL
+
+Hue, saturation and luminance for each of eight color ranges: `red`, `orange`, `yellow`,
+`green`, `aqua`, `blue`, `purple`, `magenta`. Every value goes from -1 to 1, and 0 is unchanged.
+
+```ts
+stack = withHsl(stack, 'blue', 'luminance', -0.5);  // darker sky
+stack = withHsl(stack, 'orange', 'saturation', -0.2); // calmer skin tones
+// stack.hsl is { blue: { luminance: -0.5 }, orange: { saturation: -0.2 } }
+
+<Slider {...editor.hslSliderProps('blue', 'luminance')} />
+```
+
+| Channel | What it does |
+| --- | --- |
+| `hue` | Turns the color towards its neighbours, up to 30° (for example blue towards aqua or purple). |
+| `saturation` | -1 turns that color gray, 1 makes it up to twice as strong. |
+| `luminance` | Darkens (negative) or lightens (positive) that color. Grays don't move. |
+
+The ranges blend into each other, so a color halfway between orange and yellow takes half of each
+setting and there are no hard edges. `HSL_COLORS` and `HSL_CHANNELS` list them for building a
+panel. `hsl` is left out of the stack when nothing is set, so stacks saved before HSL existed
+still load and compare equal.
 
 #### Crop, rotate, straighten, flip
 
@@ -334,8 +360,8 @@ Stacks always migrate forward, so a stack saved today keeps opening in later ver
 ## How it works
 
 ```
-decode + EXIF orientation ─▶ proxy texture (sized to the view) ─▶ crop ─▶ adjustments ─▶ filter ─▶ screen
-                         └─▶ full-resolution texture ───────────────────── same shaders ──────────▶ file
+decode + EXIF orientation ─▶ proxy texture (sized to the view) ─▶ crop ─▶ adjustments ─▶ HSL ─▶ filter ─▶ screen
+                         └─▶ full-resolution texture ───────────────────── same shaders ─────────────────▶ file
 ```
 
 - **iOS:** ImageIO decodes straight to preview size; a Metal render pipeline draws into a
@@ -350,7 +376,8 @@ decode + EXIF orientation ─▶ proxy texture (sized to the view) ─▶ crop �
   output to photo, computed by a second shared block of shader code, so they cost nothing per
   pixel and never resample the image twice.
 - **Order:** sharpness, then exposure, white balance and vignette in linear light, then
-  highlights/shadows, contrast, saturation and vibrance on the sRGB values, then the filter.
+  highlights/shadows, contrast, saturation and vibrance on the sRGB values, then HSL, then the
+  filter.
 - **Never blocks JS:** slider updates only store a value and mark the frame dirty; the native side
   draws at most once per display refresh.
 

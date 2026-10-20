@@ -4,7 +4,7 @@
 //    android/.../Shaders.kt, so both platforms run the same code.
 // 2. The Android GLSL shaders (copied verbatim from Shaders.kt) run in headless Chromium's WebGL2
 //    (GLSL ES 3.00, the same language as GLES 3.0) on a test image, once per setting (adjustments,
-//    crops and every built-in filter), and every pixel is compared with a float64 JavaScript copy
+//    crops, HSL and every built-in filter), and every pixel is compared with a float64 JavaScript copy
 //    of the same math.
 //
 //   node scripts/check-glsl.mjs   (needs `playwright-core` and a Chromium)
@@ -15,6 +15,7 @@ import { chromium } from 'playwright-core';
 process.removeAllListeners('warning');
 const { BUILT_IN_FILTERS } = await import('../src/filters/catalog.ts');
 const { packLook } = await import('../src/filters/looks.ts');
+const { packHsl } = await import('../src/edit-stack/hsl.ts');
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const kotlin = read('android/src/main/java/expo/modules/photoengine/Shaders.kt');
@@ -130,6 +131,50 @@ function applyFilter(c, f) {
   return c.map((v, i) => v + (clamp01(m[i]) - v) * intensity);
 }
 
+// Line for line with hslWeight and applyHsl. h is the 28 numbers from packHsl.
+function hslWeight(hue, center, before, after) {
+  let d = hue - center;
+  if (d > 180) d -= 360;
+  if (d < -180) d += 360;
+  const t = clamp01(d < 0 ? 1 + d / before : 1 - d / after);
+  return t * t * (3 - 2 * t);
+}
+
+function applyHsl(c, h) {
+  const top = Math.max(...c);
+  const delta = top - Math.min(...c);
+  if (delta < 0.00001) return c;
+  let hue;
+  if (top === c[0]) {
+    hue = (c[1] - c[2]) / delta;
+    if (hue < 0) hue += 6;
+  } else if (top === c[1]) {
+    hue = (c[2] - c[0]) / delta + 2;
+  } else {
+    hue = (c[0] - c[1]) / delta + 4;
+  }
+  hue *= 60;
+  const sat = delta / top;
+  const bands = [
+    [0, 60, 30], [30, 30, 30], [60, 30, 60], [120, 60, 60],
+    [180, 60, 60], [240, 60, 30], [270, 30, 30], [300, 30, 60],
+  ];
+  const w = bands.map(([center, before, after]) => hslWeight(hue, center, before, after));
+  const shift = (offset) => w.reduce((sum, wi, i) => sum + wi * h[offset + i], 0);
+  const [hueShift, satShift, lumShift] = [shift(4), shift(12), shift(20)];
+
+  const hh = (hue + hueShift * 30) / 60;
+  const s = clamp01(sat * (1 + satShift));
+  let rgb = [5, 3, 1].map((n) => {
+    let k = n + hh;
+    k -= 6 * Math.floor(k / 6);
+    return top - top * s * clamp01(Math.min(k, 4 - k));
+  });
+  const amount = lumShift * sat * 0.5;
+  rgb = rgb.map((v) => (amount > 0 ? v + (1 - v) * amount : v * (1 + amount)));
+  return rgb.map(clamp01);
+}
+
 // ---- test image: smooth gradients plus pseudo-random colors, wider than tall ----
 
 const W = 48;
@@ -201,6 +246,38 @@ const cases = [
   ...BUILT_IN_FILTERS.map((f) => ({ name: `filter ${f.id}`, filter: packLook(f.look, 1) })),
   { name: 'filter film 0.5', filter: packLook(BUILT_IN_FILTERS.find((f) => f.id === 'film').look, 0.5) },
   { name: 'filter low contrast', filter: packLook({ contrast: -0.6, power: [0.8, 1, 1.2] }, 1) },
+  // HSL.
+  { name: 'hsl red hue 1', hsl: { red: { hue: 1 } } },
+  { name: 'hsl aqua hue -1', hsl: { aqua: { hue: -1 } } },
+  { name: 'hsl blue saturation -1', hsl: { blue: { saturation: -1 } } },
+  { name: 'hsl yellow saturation 1', hsl: { yellow: { saturation: 1 } } },
+  { name: 'hsl green luminance 1', hsl: { green: { luminance: 1 } } },
+  { name: 'hsl orange luminance -1', hsl: { orange: { luminance: -1 } } },
+  {
+    name: 'hsl everything',
+    hsl: {
+      red: { hue: 0.3, saturation: -0.4, luminance: 0.2 },
+      orange: { saturation: 0.5, luminance: -0.3 },
+      yellow: { hue: -0.6 },
+      green: { hue: 0.8, saturation: -1 },
+      aqua: { luminance: 0.7 },
+      blue: { hue: -0.2, saturation: 0.6, luminance: -0.8 },
+      purple: { saturation: -0.5 },
+      magenta: { hue: 1, luminance: 0.4 },
+    },
+  },
+  {
+    name: 'hsl all gray',
+    hsl: Object.fromEntries(
+      ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta'].map((k) => [k, { saturation: -1 }])
+    ),
+  },
+  {
+    name: 'hsl + filter + adjustments',
+    hsl: { red: { hue: -0.5 }, blue: { luminance: -0.6 } },
+    filter: packLook(BUILT_IN_FILTERS[1].look, 0.7),
+    contrast: 0.3,
+  },
   {
     name: 'filter + adjustments + crop',
     filter: packLook(BUILT_IN_FILTERS[0].look, 0.8),
@@ -212,6 +289,7 @@ const cases = [
   ...c,
   crop: { ...noCrop, ...c.crop },
   filter: c.filter ?? packLook({}, 0),
+  hsl: packHsl(c.hsl),
 }));
 
 const prepared = cases.map((c) => {
@@ -290,6 +368,7 @@ const results = await page.evaluate(
       gl.uniform4fv(gl.getUniformLocation(program, 'uCrop'), new Float32Array(c.cropUniform));
       gl.uniform4fv(gl.getUniformLocation(program, 'uParams'), new Float32Array(c.params));
       gl.uniform4fv(gl.getUniformLocation(program, 'uFilter'), new Float32Array(c.filter));
+      gl.uniform4fv(gl.getUniformLocation(program, 'uHsl'), new Float32Array(c.hsl));
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       const px = new Uint8Array(c.ow * c.oh * 4);
       gl.readPixels(0, 0, c.ow, c.oh, gl.RGBA, gl.UNSIGNED_BYTE, px);
@@ -323,7 +402,8 @@ prepared.forEach((a, n) => {
           4
       );
       const adjusted = applyAdjustments(center, blur, uv, ow / oh, a);
-      const expected = a.filter[3] > 0 ? applyFilter(adjusted, a.filter) : adjusted;
+      const toned = a.hsl[0] > 0 ? applyHsl(adjusted, a.hsl) : adjusted;
+      const expected = a.filter[3] > 0 ? applyFilter(toned, a.filter) : toned;
       for (let ch = 0; ch < 3; ch++) {
         const d = Math.abs(got[(y * ow + x) * 4 + ch] - Math.round(expected[ch] * 255));
         maxDiff = Math.max(maxDiff, d);
@@ -368,7 +448,7 @@ for (const [name, x, y, sx, sy, meaning] of known) {
 }
 
 // Black-and-white filters must come out exactly gray.
-for (const name of ['filter mono', 'filter noir']) {
+for (const name of ['filter mono', 'filter noir', 'hsl all gray']) {
   const px = results.out[prepared.findIndex((a) => a.name === name)];
   for (let i = 0; i < px.length; i += 4) {
     if (px[i] !== px[i + 1] || px[i] !== px[i + 2]) {

@@ -1,3 +1,5 @@
+import type { HslAdjustments } from './hsl';
+
 /** Every adjustment the engine knows. Order is the UI order, not the pipeline order. */
 export const ADJUSTMENT_KEYS = [
   'exposure',
@@ -84,6 +86,8 @@ export type EditStack = {
   crop: Crop | null;
   adjustments: Adjustments;
   filter: FilterRef | null;
+  /** Per-color hue, saturation and luminance. Missing or empty = unchanged. */
+  hsl?: HslAdjustments;
 };
 
 export const CURRENT_EDIT_STACK_VERSION = 1;

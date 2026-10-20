@@ -13,6 +13,7 @@ internal class GlPhotoProgram {
   private val uParams: Int
   private val uCrop: Int
   private val uFilter: Int
+  private val uHsl: Int
   private val uImage: Int
   private val vertexArray: Int
   private val vertexBuffer: Int
@@ -34,6 +35,7 @@ internal class GlPhotoProgram {
     uParams = GLES30.glGetUniformLocation(program, "uParams")
     uCrop = GLES30.glGetUniformLocation(program, "uCrop")
     uFilter = GLES30.glGetUniformLocation(program, "uFilter")
+    uHsl = GLES30.glGetUniformLocation(program, "uHsl")
     uImage = GLES30.glGetUniformLocation(program, "uImage")
 
     // The quad's corners come from a real vertex buffer. Building them from gl_VertexID with no
@@ -81,6 +83,7 @@ internal class GlPhotoProgram {
     GLES30.glUniform4fv(uCrop, 2, params.crop.packed, 0)
     GLES30.glUniform4fv(uParams, 3, params.packed(outputAspect = imageAspect), 0)
     GLES30.glUniform4fv(uFilter, 8, params.filter, 0)
+    GLES30.glUniform4fv(uHsl, 7, params.hsl, 0)
     GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
   }
 
@@ -184,25 +187,29 @@ internal class ShaderParams private constructor(
   val crop: CropGeometry,
   /** applyFilter's f0..f7 (uFilter[8]), packed by src/filters/looks.ts. All zeros = no filter. */
   val filter: FloatArray,
+  /** applyHsl's h0..h6 (uHsl[7]), packed by src/edit-stack/hsl.ts. All zeros = no HSL change. */
+  val hsl: FloatArray,
 ) {
-  constructor() : this(FloatArray(12), CropGeometry(), FloatArray(FILTER_COUNT))
+  constructor() : this(FloatArray(12), CropGeometry(), FloatArray(FILTER_COUNT), FloatArray(HSL_COUNT))
 
   constructor(
     adjustments: Map<String, Double>,
     crop: CropGeometry = CropGeometry(),
     filter: List<Double> = emptyList(),
+    hsl: List<Double> = emptyList(),
   ) : this(
     FloatArray(12).also { values ->
       for ((key, value) in adjustments) SLOTS[key]?.let { values[it] = value.toFloat() }
     },
     crop,
     if (filter.size == FILTER_COUNT) FloatArray(FILTER_COUNT) { filter[it].toFloat() } else FloatArray(FILTER_COUNT),
+    if (hsl.size == HSL_COUNT) FloatArray(HSL_COUNT) { hsl[it].toFloat() } else FloatArray(HSL_COUNT),
   )
 
   /** Returns a copy with [key] changed, or null for a key the shader doesn't know. */
   fun with(key: String, value: Double): ShaderParams? {
     val slot = SLOTS[key] ?: return null
-    return ShaderParams(values.copyOf().also { it[slot] = value.toFloat() }, crop, filter)
+    return ShaderParams(values.copyOf().also { it[slot] = value.toFloat() }, crop, filter, hsl)
   }
 
   /** The fragment shader's uParams[3], with the output's width / height filled in. */
@@ -217,5 +224,6 @@ internal class ShaderParams private constructor(
     )
     private const val OUTPUT_ASPECT_SLOT = 10
     private const val FILTER_COUNT = 32
+    private const val HSL_COUNT = 28
   }
 }
