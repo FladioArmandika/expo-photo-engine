@@ -223,6 +223,25 @@ vec3 applyFilter(vec3 c, vec4 f0, vec4 f1, vec4 f2, vec4 f3, vec4 f4, vec4 f5, v
 }
 // END SHARED ADJUSTMENTS
 
+// Tone curves, packed by packCurves in src/edit-stack/curves.ts: curves[0].x = 1 when any curve
+// is set, then curves[1 + k] holds the rgb, red, green and blue curves (x, y, z, w) at input
+// k / 32. In between, the samples are blended linearly: each sample k gets the weight
+// max(0, 1 - |32 x - k|). Looping over every sample keeps the index the same for every pixel;
+// see applyCurves in android/.../Shaders.kt for why. Mirrors that function.
+float3 applyCurves(float3 c, constant float4 *curves) {
+  float3 pos = clamp(c, 0.0, 1.0) * 32.0;
+  float3 rgb = float3(0.0);
+  for (int k = 0; k <= 32; k++) {
+    rgb += max(1.0 - abs(pos - float(k)), float3(0.0)) * curves[1 + k].x;
+  }
+  pos = clamp(rgb, 0.0, 1.0) * 32.0;
+  float3 result = float3(0.0);
+  for (int k = 0; k <= 32; k++) {
+    result += max(1.0 - abs(pos - float(k)), float3(0.0)) * curves[1 + k].yzw;
+  }
+  return result;
+}
+
 // Bilinear read done in the shader instead of by the GPU's sampler. Every GPU blends with its own
 // weight precision, which made straightened crops differ by a few levels on hard edges between
 // iOS and Android. Here the weights are rounded to 1/256 the same way on both, and at a pixel
@@ -244,7 +263,8 @@ float4 sampleImage(texture2d<float> image, float2 uv) {
 }
 
 // params[0..2] = p0, p1, p2 of applyAdjustments (params[2].z is the output's width / height),
-// params[3..10] = f0..f7 of applyFilter, params[11..17] = h0..h6 of applyHsl.
+// params[3..10] = f0..f7 of applyFilter, params[11..17] = h0..h6 of applyHsl, params[18..51] =
+// the curves (see applyCurves).
 fragment float4 photo_fragment(VertexOut in [[stage_in]],
                                texture2d<float> image [[texture(0)]],
                                constant float4 *params [[buffer(0)]]) {
@@ -261,6 +281,9 @@ fragment float4 photo_fragment(VertexOut in [[stage_in]],
   }
   float3 edited = applyAdjustments(
     color.rgb, blur, in.uv, params[2].z, params[0], params[1], params[2]);
+  if (params[18].x > 0.0) {
+    edited = applyCurves(edited, params + 18);
+  }
   if (params[11].x > 0.0) {
     edited = applyHsl(edited, params[12], params[13], params[14], params[15], params[16], params[17]);
   }

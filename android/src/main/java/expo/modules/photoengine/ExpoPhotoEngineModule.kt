@@ -28,6 +28,8 @@ class EditStackRecord : Record {
   @Field val filter: FilterRecord? = null
   /** Packed by packHsl in src/edit-stack/hsl.ts. Empty or all zeros = no HSL change. */
   @Field val hsl: List<Double> = emptyList()
+  /** Packed by packCurves in src/edit-stack/curves.ts. Empty or all zeros = no curves. */
+  @Field val curves: List<Double> = emptyList()
 }
 
 class ThumbnailOptionsRecord : Record {
@@ -43,7 +45,13 @@ class ExportOptionsRecord : Record {
 }
 
 internal fun EditStackRecord.toShaderParams() =
-  ShaderParams(adjustments, crop?.let(::CropGeometry) ?: CropGeometry(), filter?.uniforms ?: emptyList(), hsl)
+  ShaderParams(
+    adjustments,
+    crop?.let(::CropGeometry) ?: CropGeometry(),
+    filter?.uniforms ?: emptyList(),
+    hsl,
+    curves,
+  )
 
 class ExpoPhotoEngineModule : Module() {
   override fun definition() = ModuleDefinition {

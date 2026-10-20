@@ -22,6 +22,8 @@ struct EditStackRecord: Record {
   @Field var filter: FilterRecord? = nil
   /// Packed by packHsl in src/edit-stack/hsl.ts. Empty or all zeros = no HSL change.
   @Field var hsl: [Double] = []
+  /// Packed by packCurves in src/edit-stack/curves.ts. Empty or all zeros = no curves.
+  @Field var curves: [Double] = []
 }
 
 struct ThumbnailOptionsRecord: Record {

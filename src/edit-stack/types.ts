@@ -1,3 +1,4 @@
+import type { ToneCurves } from './curves';
 import type { HslAdjustments } from './hsl';
 
 /** Every adjustment the engine knows. Order is the UI order, not the pipeline order. */
@@ -88,6 +89,8 @@ export type EditStack = {
   filter: FilterRef | null;
   /** Per-color hue, saturation and luminance. Missing or empty = unchanged. */
   hsl?: HslAdjustments;
+  /** Tone curves. Missing or empty = unchanged. */
+  curves?: ToneCurves;
 };
 
 export const CURRENT_EDIT_STACK_VERSION = 1;

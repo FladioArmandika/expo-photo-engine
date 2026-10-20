@@ -3,6 +3,8 @@ import { useMemo, useState, useSyncExternalStore } from 'react';
 import type { PhotoCanvasRef } from '../PhotoCanvas';
 import { PhotoEditorController } from './PhotoEditorController';
 import type { CropOverlayProps } from '../crop/CropOverlay';
+import type { ToneCurveEditorProps } from '../curves/ToneCurveEditor';
+import type { CurveChannel } from '../edit-stack/curves';
 import type { HslChannel, HslColor } from '../edit-stack/hsl';
 import { migrateEditStack } from '../edit-stack/migrate';
 import { ADJUSTMENTS, type AdjustmentKey, type EditStack } from '../edit-stack/types';
@@ -53,6 +55,10 @@ export type PhotoEditor = {
   filterSliderProps: () => AdjustmentSliderProps;
   /** Slider props for one color's hue, saturation or luminance, -1..1. One drag = one undo step. */
   hslSliderProps: (color: HslColor, channel: HslChannel) => AdjustmentSliderProps;
+  /** Spread onto <ToneCurveEditor> to edit one curve. Each drag is one undo step. */
+  curveEditorProps: (
+    channel: CurveChannel
+  ) => Pick<ToneCurveEditorProps, 'points' | 'onChange' | 'onGestureStart' | 'onGestureEnd'>;
   /** The underlying controller: setAdjustment, setCrop, setFilter, undo, redo, reset, getEdits… */
   controller: PhotoEditorController;
 } & Pick<
@@ -63,6 +69,7 @@ export type PhotoEditor = {
   | 'setCropping'
   | 'setFilterIntensity'
   | 'setHsl'
+  | 'setCurve'
   | 'setEdits'
   | 'update'
   | 'beginGesture'
@@ -132,6 +139,12 @@ export function usePhotoEditor(options: UsePhotoEditorOptions = {}): PhotoEditor
         onValueChange: (value) => c.setHsl(color, channel, value),
         onSlidingComplete: () => c.endGesture(),
       }),
+      curveEditorProps: (channel) => ({
+        points: state.present.curves?.[channel] ?? null,
+        onChange: (points) => c.setCurve(channel, points),
+        onGestureStart: () => c.beginGesture(),
+        onGestureEnd: () => c.endGesture(),
+      }),
       controller: c,
       setAdjustment: (key, value) => c.setAdjustment(key, value),
       setCrop: (crop) => c.setCrop(crop),
@@ -139,6 +152,7 @@ export function usePhotoEditor(options: UsePhotoEditorOptions = {}): PhotoEditor
       setCropping: (cropping) => c.setCropping(cropping),
       setFilterIntensity: (intensity) => c.setFilterIntensity(intensity),
       setHsl: (color, channel, value) => c.setHsl(color, channel, value),
+      setCurve: (channel, points) => c.setCurve(channel, points),
       setEdits: (stack) => c.setEdits(stack),
       update: (change) => c.update(change),
       beginGesture: () => c.beginGesture(),
