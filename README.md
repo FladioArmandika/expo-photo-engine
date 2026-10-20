@@ -19,7 +19,7 @@ The engine renders the live preview and the full-resolution export natively, on 
 same result on iOS and Android.
 
 > [!WARNING]
-> **Pre-alpha.** Adjustments, crop, filters and PNG/JPEG export work and are being benchmarked
+> **Pre-alpha.** Adjustments, crop, filters and PNG/JPEG/HEIC export work and are being benchmarked
 > on devices. Everything marked _planned_ below is the v1 target, not shipped code. Don't use it
 > in production yet.
 
@@ -88,13 +88,13 @@ general-purpose 2D canvas.
 | Imperative updates coalesced to the display refresh (60/120Hz) | ✅ spike |
 | Render stats: fps, CPU/GPU frame time, input latency, preview size | ✅ spike |
 | Exposure, contrast, highlights, shadows, saturation, vibrance, warmth, tint, sharpness, vignette | ✅ |
-| Headless export (PNG, JPEG) | ✅ spike |
+| Headless export (PNG, JPEG, HEIC) | ✅ |
 | Crop, 90° rotation, straighten, flip | ✅ |
 | Optional `CropOverlay` with drag handles | planned |
 | Filters with intensity, 11 built in, your own as data, live thumbnails | ✅ |
 | Edit stack: types, validation, migration, undo/redo history | ✅ |
 | `usePhotoEditor` hook: undo/redo, unsaved-changes flag, slider wiring | ✅ |
-| HEIC export, metadata (EXIF) preservation | planned |
+| Keeps the original's metadata (EXIF, GPS optional) in exports | ✅ |
 | Cross-platform golden-image tests in CI | planned |
 
 ## Installation
@@ -182,12 +182,21 @@ Renders `edits` onto `source` with the same shaders as the preview and writes a 
 directory. Works without a mounted view.
 
 ```ts
-const { uri, width, height, totalMs, renderMs } = await exportImage(source, edits, {
-  format: 'jpeg',     // 'png' | 'jpeg'  (heic planned)
-  quality: 0.92,      // JPEG only
+const { uri, width, height, metadata, totalMs, renderMs } = await exportImage(source, edits, {
+  format: 'jpeg',     // 'png' | 'jpeg' | 'heic'
+  quality: 0.92,      // JPEG and HEIC
   maxDimension: 4096, // 0 = full resolution
+  metadata: 'all',    // 'all' | 'no-location' | 'none'
 });
 ```
+
+The export keeps the original's camera, lens, exposure, date and copyright metadata, and its GPS
+location unless you pass `metadata: 'no-location'`. Orientation is reset to "up" because the
+pixels are already upright, and color profile info is dropped because the output is always sRGB.
+`result.metadata` says whether anything was written.
+
+HEIC needs a device with a HEVC encoder: iOS devices from the iPhone 7 on, and Android 9 or newer.
+On Android, HEIC files don't carry metadata yet (JPEG and PNG do).
 
 ### `EditStack`
 
@@ -334,7 +343,7 @@ node scripts/compare-images.mjs ios.png android.png diff.png
 
 ## Roadmap
 
-**v1:** `CropOverlay`, HEIC export and metadata, golden-image tests in CI.
+**v1:** `CropOverlay`, golden-image tests in CI, device benchmarks.
 
 **Later:** drawing, text, stickers, `.cube` LUT import, masks and local adjustments, RAW, web.
 

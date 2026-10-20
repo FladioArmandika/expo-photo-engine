@@ -24,6 +24,7 @@ export function exportImage(
     format: options.format ?? 'png',
     quality: options.quality ?? 0.92,
     maxDimension: options.maxDimension ?? 0,
+    metadata: options.metadata ?? 'all',
   });
 }
 

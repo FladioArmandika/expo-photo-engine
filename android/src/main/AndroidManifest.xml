@@ -1,2 +1,5 @@
-<manifest>
+<manifest xmlns:tools="http://schemas.android.com/tools">
+  <!-- heifwriter declares minSdk 28. It is only used for HEIC export, which checks for Android 9
+       (API 28) before touching it, so apps can keep a lower minSdk. -->
+  <uses-sdk tools:overrideLibrary="androidx.heifwriter" />
 </manifest>

@@ -12,6 +12,7 @@ import {
   withStraighten,
   type AdjustmentKey,
   type EditStack,
+  type ExportFormat,
   type ExportResult,
   type FilterThumbnail,
   type LoadEvent,
@@ -38,6 +39,7 @@ export default function App() {
   const [stats, setStats] = useState<RenderStats | null>(null);
   const [sweeping, setSweeping] = useState(false);
   const [exported, setExported] = useState<ExportResult | null>(null);
+  const [format, setFormat] = useState<ExportFormat>('png');
   const [error, setError] = useState<string | null>(null);
   const [thumbnails, setThumbnails] = useState<FilterThumbnail[]>([]);
 
@@ -110,7 +112,7 @@ export default function App() {
     setExported(null);
     try {
       const result = await exportImage(source, editor.getEdits(), {
-        format: 'png',
+        format,
         maxDimension: 0,
       });
       setExported(result);
@@ -240,13 +242,17 @@ export default function App() {
         <Button title="Undo" disabled={!editor.canUndo} onPress={editor.undo} />
         <Button title="Redo" disabled={!editor.canRedo} onPress={editor.redo} />
         <Button title="Reset" onPress={() => editor.reset()} />
-        <Button title="Export PNG" onPress={runExport} />
+        <Button
+          title={format.toUpperCase()}
+          onPress={() => setFormat((f) => (f === 'png' ? 'jpeg' : f === 'jpeg' ? 'heic' : 'png'))}
+        />
+        <Button title="Export" onPress={runExport} />
         {exported && <Button title="Share" onPress={() => Sharing.shareAsync(exported.uri)} />}
       </View>
       {exported && (
         <Text style={styles.info}>
           Exported {exported.width}x{exported.height} in {exported.totalMs.toFixed(0)}ms (render{' '}
-          {exported.renderMs.toFixed(1)}ms)
+          {exported.renderMs.toFixed(1)}ms){exported.metadata ? ', metadata kept' : ''}
         </Text>
       )}
       {error && <Text style={styles.error}>{error}</Text>}
