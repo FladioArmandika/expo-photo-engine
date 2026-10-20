@@ -131,7 +131,7 @@ A native view that renders `source` with the current edits.
 | --- | --- | --- |
 | `source` | `string` | `file://` URI or absolute path of a JPEG, HEIC or PNG. `content://` on Android. |
 | `edits` | `EditStack` | Initial edit stack. For live dragging use the ref methods. |
-| `previewQuality` | `'auto' \| 'fast' \| 'full'` | `auto`: preview sized to the view's pixels. `fast`: half that. `full`: full resolution, clamped to the GPU's max texture size. |
+| `previewQuality` | `'auto' \| 'fast' \| 'full'` | `auto`: preview sized to the view's pixels. `fast`: half that. `full`: full resolution, clamped to the GPU's max texture size. With `auto` and `fast`, a tight crop decodes a bigger preview (up to 4096px) when the drag ends, so the cropped area stays sharp. |
 | `onLoad` | `(e: LoadEvent) => void` | Source and preview size, decode time. |
 | `onError` | `(e: { message: string }) => void` | Decode or GPU errors. |
 | `onRenderStats` | `(s: RenderStats) => void` | About twice a second while rendering: `fps`, `frameTimeMs`, `gpuTimeMs` (iOS), `latencyMs`, preview and source size. |
