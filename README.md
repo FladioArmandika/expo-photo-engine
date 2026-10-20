@@ -20,7 +20,7 @@ same result on iOS and Android.
 
 > [!WARNING]
 > **Pre-alpha.** The ten adjustments and PNG/JPEG export work and are being benchmarked on
-> devices. Filters and the crop handles UI are not built yet. Everything marked _planned_ below is the v1 target,
+> devices. Filters are not built yet. Everything marked _planned_ below is the v1 target,
 > not shipped code. Don't use it in production yet.
 
 ## Why
@@ -90,7 +90,7 @@ general-purpose 2D canvas.
 | Exposure, contrast, highlights, shadows, saturation, vibrance, warmth, tint, sharpness, vignette | ✅ |
 | Headless export (PNG, JPEG) | ✅ spike |
 | Crop, 90° rotation, straighten, flip | ✅ |
-| Optional `CropOverlay` with drag handles | planned |
+| Optional `CropOverlay` with drag handles and aspect lock | ✅ |
 | LUT filters with intensity, filter catalog as data, live thumbnails | planned |
 | Edit stack: types, validation, migration, undo/redo history | ✅ |
 | `usePhotoEditor` hook: undo/redo, unsaved-changes flag, slider wiring | ✅ |
@@ -168,6 +168,8 @@ const editor = usePhotoEditor({
 | `setAdjustment(key, value)` | Sets one value. Outside a gesture it is its own undo step. |
 | `beginGesture()`, `endGesture()` | Group everything in between into one undo step. Use these with your own slider or gesture code. |
 | `setCrop(crop)`, `setFilter(filter)`, `setEdits(stack)` | One undo step each. |
+| `setCropping(on)`, `cropping` | Crop editing mode: the canvas shows the whole photo so a `CropOverlay` can sit on top. |
+| `cropOverlayProps(photo)` | Spread onto `<CropOverlay>`, with `photo` = the `onLoad` event (or any `{ sourceWidth, sourceHeight }`). One drag = one undo step. |
 | `update(change)` | Applies a function to the current edits, e.g. `update(rotateRight)`. One undo step, or part of the gesture in progress. |
 | `reset(stack?)` | Start over (default: the original photo) with an empty history. |
 
@@ -245,6 +247,32 @@ and flips. `rotateRight` and the flips move the rect along with the photo, so th
 selected. Straightening zooms in just enough that the crop never shows anything outside the
 photo. The preview, the export and its pixel size all follow the crop.
 
+#### Crop handles
+
+`CropOverlay` is an optional crop box you can drop over the canvas: drag a corner or an edge to
+resize, drag inside to move, and the dimmed area shows what will be cut off. It's plain React
+Native views, so restyle it with `color` and `dimColor` or write your own using the same geometry
+helpers (`dragCropBox`, `hitTest`, `fitFrame`).
+
+```tsx
+const [photo, setPhoto] = useState<LoadEvent | null>(null);
+
+<View style={{ flex: 1 }}>
+  <PhotoCanvas source={uri} style={StyleSheet.absoluteFill} onLoad={setPhoto} {...editor.canvasProps} />
+  {photo && editor.cropping && (
+    <CropOverlay {...editor.cropOverlayProps(photo)} style={StyleSheet.absoluteFill} />
+  )}
+</View>
+<Button title={editor.cropping ? 'Done' : 'Crop'} onPress={() => editor.setCropping(!editor.cropping)} />
+<Button title="Square" onPress={() => editor.update((s) => withCropAspect(s, '1:1', photo.sourceWidth, photo.sourceHeight))} />
+```
+
+Give the overlay the same position and size as the canvas. While `cropping` is on, the canvas
+shows the whole photo (rotated, flipped and straightened) and the box marks the crop.
+`withCropAspect` switches to `free`, `original` or any `w:h`; with a fixed aspect, corners keep
+the opposite corner in place and edges grow around the middle. When the photo is straightened,
+the final zoom is fitted to the chosen crop, so the result can show slightly more than the box.
+
 `filter` (LUT id + intensity) is already part of the format and validated; rendering it is
 planned. Stacks always migrate forward, so a stack saved today keeps opening in later versions.
 
@@ -292,8 +320,7 @@ node scripts/compare-images.mjs ios.png android.png diff.png
 
 ## Roadmap
 
-**v1:** `CropOverlay`, LUT filters with
-thumbnails, HEIC export and metadata, golden-image tests in CI.
+**v1:** LUT filters with thumbnails, HEIC export and metadata, golden-image tests in CI.
 
 **Later:** drawing, text, stickers, custom LUT import, masks and local adjustments, RAW, web.
 

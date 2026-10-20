@@ -1,9 +1,13 @@
 import type { PhotoCanvasRef } from '../PhotoCanvas';
+import { cropEditingView } from '../crop/geometry';
 import { EditHistory, type HistoryState } from '../edit-stack/history';
 import { createEditStack, withAdjustment, withCrop, withFilter } from '../edit-stack/operations';
 import type { AdjustmentKey, Crop, EditStack, FilterRef } from '../edit-stack/types';
 
-export type PhotoEditorState = HistoryState;
+export type PhotoEditorState = HistoryState & {
+  /** True while the crop is being edited: the canvas shows the whole photo. */
+  cropping: boolean;
+};
 
 /**
  * Connects an EditHistory to a PhotoCanvas.
@@ -21,15 +25,23 @@ export class PhotoEditorController {
   private canvas: PhotoCanvasRef | null = null;
   private draft: EditStack;
   private gestures = 0;
+  private cropping = false;
+  private state: PhotoEditorState;
+  private listeners = new Set<() => void>();
 
   constructor(initial: EditStack = createEditStack(), historyLimit?: number) {
     this.history = new EditHistory(initial, historyLimit);
     this.draft = initial;
+    this.state = { ...this.history.getState(), cropping: false };
+    this.history.subscribe(() => this.emit());
   }
 
-  getState = (): PhotoEditorState => this.history.getState();
+  getState = (): PhotoEditorState => this.state;
 
-  subscribe = (listener: () => void): (() => void) => this.history.subscribe(listener);
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
 
   /** Ref callback for PhotoCanvas. */
   attachCanvas = (canvas: PhotoCanvasRef | null): void => {
@@ -63,6 +75,22 @@ export class PhotoEditorController {
     // Send the clamped value, so the preview never shows something the stack can't store.
     this.canvas?.setAdjustment(key, this.draft.adjustments[key] ?? 0);
     if (this.gestures === 0) this.history.commit(this.draft);
+  }
+
+  /**
+   * Turns crop editing on or off. While on, the canvas shows the whole photo (still rotated,
+   * flipped and straightened) so a CropOverlay can be drawn over it. The edits are unchanged.
+   */
+  setCropping(cropping: boolean): void {
+    if (cropping === this.cropping) return;
+    this.cropping = cropping;
+    this.canvas?.setEdits(this.view(this.draft));
+    this.emit();
+  }
+
+  /** The stack as the canvas should show it. */
+  view(stack: EditStack): EditStack {
+    return this.cropping ? cropEditingView(stack) : stack;
   }
 
   setCrop(crop: Crop | null): void {
@@ -106,7 +134,7 @@ export class PhotoEditorController {
 
   private apply(next: EditStack) {
     this.draft = next;
-    this.canvas?.setEdits(next);
+    this.canvas?.setEdits(this.view(next));
     if (this.gestures === 0) this.history.commit(next);
   }
 
@@ -117,6 +145,11 @@ export class PhotoEditorController {
       this.canvas?.endInteraction();
     }
     this.draft = stack;
-    this.canvas?.setEdits(stack);
+    this.canvas?.setEdits(this.view(stack));
+  }
+
+  private emit() {
+    this.state = { ...this.history.getState(), cropping: this.cropping };
+    for (const listener of this.listeners) listener();
   }
 }

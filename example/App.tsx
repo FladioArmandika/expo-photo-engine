@@ -1,16 +1,16 @@
 import {
   ADJUSTMENT_KEYS,
   ADJUSTMENTS,
-  createCrop,
+  CropOverlay,
   exportImage,
   flipHorizontal,
   PhotoCanvas,
   rotateRight,
   usePhotoEditor,
-  withCrop,
+  withCropAspect,
   withStraighten,
   type AdjustmentKey,
-  type EditStack,
+  type CropAspect,
   type ExportResult,
   type LoadEvent,
   type PreviewQuality,
@@ -124,6 +124,13 @@ export default function App() {
         ) : (
           <Text style={styles.hint}>Pick a 24MP+ photo or use the parity chart.</Text>
         )}
+        {source && load && editor.cropping && (
+          <CropOverlay
+            {...editor.cropOverlayProps(load)}
+            // Same size as the canvas, so the box lines up with the photo.
+            style={StyleSheet.absoluteFill}
+          />
+        )}
         <View style={styles.overlay} pointerEvents="none">
           <Text style={styles.overlayText}>
             {Platform.OS} {Platform.Version}
@@ -175,11 +182,25 @@ export default function App() {
         <Button title="Flip" onPress={() => editor.update(flipHorizontal)} />
         {load && (
           <Button
-            title="Crop 1:1"
-            onPress={() => editor.update((s) => squareCrop(s, load.sourceWidth, load.sourceHeight))}
+            title={editor.cropping ? 'Done' : 'Crop'}
+            onPress={() => editor.setCropping(!editor.cropping)}
           />
         )}
       </View>
+      {load && editor.cropping && (
+        <View style={[styles.row, styles.aspects]}>
+          {ASPECTS.map((aspect) => (
+            <Button
+              key={aspect}
+              title={aspect}
+              selected={(editor.edits.crop?.aspect ?? 'free') === aspect}
+              onPress={() =>
+                editor.update((s) => withCropAspect(s, aspect, load.sourceWidth, load.sourceHeight))
+              }
+            />
+          ))}
+        </View>
+      )}
 
       <View style={styles.row}>
         <Button
@@ -203,31 +224,27 @@ export default function App() {
   );
 }
 
-// Toggles a centered square crop (in the photo as currently rotated), keeping rotation and flips.
-function squareCrop(stack: EditStack, width: number, height: number): EditStack {
-  const crop = stack.crop ?? createCrop();
-  if (crop.aspect === '1:1')
-    return withCrop(stack, { ...crop, rect: [0, 0, 1, 1], aspect: 'free' });
-  // Width / height of the photo as shown, after the quarter turns.
-  const shown = crop.rotation % 180 === 0 ? width / height : height / width;
-  const rect: [number, number, number, number] =
-    shown > 1 ? [(1 - 1 / shown) / 2, 0, 1 / shown, 1] : [0, (1 - shown) / 2, 1, shown];
-  return withCrop(stack, { ...crop, rect, aspect: '1:1' });
-}
+const ASPECTS: CropAspect[] = ['free', 'original', '1:1', '4:5', '16:9'];
 
 function Button({
   title,
   onPress,
   disabled,
+  selected,
 }: {
   title: string;
   onPress: () => void;
   disabled?: boolean;
+  selected?: boolean;
 }) {
   return (
     <Pressable
       disabled={disabled}
-      style={({ pressed }) => [styles.button, (pressed || disabled) && styles.pressed]}
+      style={({ pressed }) => [
+        styles.button,
+        selected && styles.selected,
+        (pressed || disabled) && styles.pressed,
+      ]}
       onPress={onPress}>
       <Text style={styles.buttonText}>{title}</Text>
     </Pressable>
@@ -282,6 +299,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   pressed: { opacity: 0.6 },
+  selected: { backgroundColor: '#55555c' },
+  aspects: { marginTop: 8 },
   buttonText: { color: '#fff', fontWeight: '600' },
   info: { color: '#bbb', marginTop: 8 },
   error: { color: '#ff6b6b', marginTop: 8 },
