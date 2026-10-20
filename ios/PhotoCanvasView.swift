@@ -18,13 +18,26 @@ private final class DisplayLinkProxy: NSObject {
   @objc func tick(_ link: CADisplayLink) { view?.renderFrame() }
 }
 
-/// Longest side of the preview texture for a given quality setting.
-private func previewPixelSize(quality: String, viewLongest: Int, fullLongest: Int) -> Int {
-  switch quality {
-  case "full": return min(fullLongest, PhotoRenderer.maxTextureSize)
-  case "fast": return max(1, min(fullLongest, viewLongest / 2))
-  default: return max(1, min(fullLongest, viewLongest))
+/// Longest side of the preview texture for a given quality setting. `zoom` is how much the crop
+/// enlarges the photo on screen: a crop of half the photo needs twice the pixels to stay sharp.
+private func previewPixelSize(quality: String, viewLongest: Int, fullLongest: Int, zoom: Double) -> Int {
+  if quality == "full" {
+    return min(fullLongest, PhotoRenderer.maxTextureSize)
   }
+  let base = Double(quality == "fast" ? viewLongest / 2 : viewLongest)
+  // Zooming in never asks for more than previewZoomLimit pixels, to bound memory.
+  let zoomed = min(base * zoom, max(base, Double(previewZoomLimit)))
+  return max(1, min(fullLongest, PhotoRenderer.maxTextureSize, Int(zoomed.rounded(.up))))
+}
+
+/// Largest preview texture a crop can ask for (a 4096x3072 texture is 48 MB).
+private let previewZoomLimit = 4096
+
+/// The crop's zoom rounded up to steps of √2, so small crop changes don't each cause a new decode.
+private func zoomStep(_ crop: CropGeometry, width: Int, height: Int) -> Double {
+  guard width > 0, height > 0 else { return 1 }
+  let zoom = 1 / Double(max(crop.longestFraction(width: width, height: height), 0.01))
+  return pow(2, ((log2(zoom) * 2) - 0.05).rounded(.up) / 2)
 }
 
 final class PhotoCanvasView: ExpoView {
@@ -42,7 +55,9 @@ final class PhotoCanvasView: ExpoView {
   private var texture: MTLTexture?
   private var sourceSize = (width: 0, height: 0)
   private var loadGeneration = 0
+  /// Source, quality and view size of the current texture, and the crop zoom it was decoded for.
   private var loadedKey: String?
+  private var loadedZoom = 1.0
 
   // Render coalescing: inputs only set a flag; the display link draws at most once per refresh.
   private var needsRender = false
@@ -110,6 +125,10 @@ final class PhotoCanvasView: ExpoView {
   func setEdits(_ edits: EditStackRecord) {
     params = ShaderParams(edits)
     markInput()
+    // A tighter crop may need a sharper preview. Wait for the end of a drag before decoding.
+    if !interacting {
+      reloadIfNeeded()
+    }
   }
 
   func setAdjustment(_ key: String, _ value: Double) {
@@ -125,6 +144,7 @@ final class PhotoCanvasView: ExpoView {
     interacting = false
     emitStats(force: true)
     setNeedsRender()
+    reloadIfNeeded()
   }
 
   private func markInput() {
@@ -149,8 +169,13 @@ final class PhotoCanvasView: ExpoView {
 
     let quality = previewQuality
     let key = "\(source)|\(quality)|\(quality == "full" ? 0 : viewLongest)"
-    guard key != loadedKey else { return }
+    let zoom = quality == "full" ? 1 : zoomStep(params.crop, width: sourceSize.width, height: sourceSize.height)
+    // Same photo and view: only decode again when the crop needs more pixels than the texture has.
+    // A looser crop keeps the sharper texture.
+    let sharpen = key == loadedKey
+    if sharpen && zoom <= loadedZoom { return }
     loadedKey = key
+    loadedZoom = zoom
     loadGeneration += 1
     let generation = loadGeneration
 
@@ -161,7 +186,8 @@ final class PhotoCanvasView: ExpoView {
         let url = try PhotoRenderer.url(for: source)
         let full = try PhotoRenderer.orientedSize(of: url)
         let target = previewPixelSize(
-          quality: quality, viewLongest: viewLongest, fullLongest: max(full.width, full.height))
+          quality: quality, viewLongest: viewLongest, fullLongest: max(full.width, full.height),
+          zoom: zoom)
         let image = try PhotoRenderer.decode(url: url, maxPixelSize: target)
         let texture = try renderer.makeTexture(from: image)
         let decodeMs = (CACurrentMediaTime() - start) * 1000
@@ -169,6 +195,9 @@ final class PhotoCanvasView: ExpoView {
           guard let self, generation == self.loadGeneration else { return }
           self.texture = texture
           self.sourceSize = full
+          self.setNeedsRender()
+          // A sharper texture for a crop is not a new load.
+          guard !sharpen else { return }
           self.onLoad([
             "sourceWidth": full.width,
             "sourceHeight": full.height,
@@ -176,7 +205,8 @@ final class PhotoCanvasView: ExpoView {
             "previewHeight": texture.height,
             "decodeMs": decodeMs,
           ])
-          self.setNeedsRender()
+          // The first decode didn't know the photo's size yet, so it couldn't account for the crop.
+          self.reloadIfNeeded()
         }
       } catch {
         DispatchQueue.main.async {

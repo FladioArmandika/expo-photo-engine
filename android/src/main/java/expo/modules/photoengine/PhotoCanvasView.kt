@@ -18,8 +18,24 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.ceil
+import kotlin.math.log2
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
+
+/** Largest preview texture a crop can ask for (a 4096x3072 texture is 48 MB). */
+private const val PREVIEW_ZOOM_LIMIT = 4096
+
+/**
+ * How much the crop enlarges the photo on screen (a crop of half the photo needs twice the pixels
+ * to stay sharp), rounded up to steps of √2 so small crop changes don't each cause a new decode.
+ */
+private fun zoomStep(crop: CropGeometry, width: Int, height: Int): Double {
+  if (width <= 0 || height <= 0) return 1.0
+  val zoom = 1.0 / max(crop.longestFraction(width, height).toDouble(), 0.01)
+  return 2.0.pow(ceil(log2(zoom) * 2 - 0.05) / 2)
+}
 
 /**
  * Threads:
@@ -42,7 +58,11 @@ class PhotoCanvasView(context: Context, appContext: AppContext) :
   // Main-thread state.
   private var source: String? = null
   private var previewQuality = "auto"
+  /** Source, quality and view size of the current texture, and the crop zoom it was decoded for. */
   private var loadedKey: String? = null
+  private var loadedZoom = 1.0
+  private var loadedSourceWidth = 0
+  private var loadedSourceHeight = 0
   private var surfaceLongest = 0
 
   // Written on one thread, read on another.
@@ -120,6 +140,8 @@ class PhotoCanvasView(context: Context, appContext: AppContext) :
   fun setEdits(edits: EditStackRecord) {
     params = edits.toShaderParams()
     markInput()
+    // A tighter crop may need a sharper preview. Wait for the end of a drag before decoding.
+    if (!interacting) reloadIfNeeded()
   }
 
   fun setAdjustment(key: String, value: Double) {
@@ -135,6 +157,7 @@ class PhotoCanvasView(context: Context, appContext: AppContext) :
     interacting = false
     renderHandler.post(flushStats)
     requestRender()
+    reloadIfNeeded()
   }
 
   private fun markInput() {
@@ -162,8 +185,13 @@ class PhotoCanvasView(context: Context, appContext: AppContext) :
     if (src.isEmpty() || viewLongest <= 0) return
     val quality = previewQuality
     val key = "$src|$quality|${if (quality == "full") 0 else viewLongest}"
-    if (key == loadedKey) return
+    val zoom = if (quality == "full") 1.0 else zoomStep(params.crop, loadedSourceWidth, loadedSourceHeight)
+    // Same photo and view: only decode again when the crop needs more pixels than the texture has.
+    // A looser crop keeps the sharper texture.
+    val sharpen = key == loadedKey
+    if (sharpen && zoom <= loadedZoom) return
     loadedKey = key
+    loadedZoom = zoom
     val generation = loadGeneration.incrementAndGet()
 
     decodePool.execute {
@@ -172,10 +200,13 @@ class PhotoCanvasView(context: Context, appContext: AppContext) :
         val info = PhotoDecoder.readInfo(context, src)
         val fullLongest = max(info.width, info.height)
         val maxTexture = if (maxTextureSize > 0) maxTextureSize else 4096
-        val target = when (quality) {
-          "full" -> min(fullLongest, maxTexture)
-          "fast" -> max(1, min(fullLongest, viewLongest / 2))
-          else -> max(1, min(fullLongest, viewLongest))
+        val target = if (quality == "full") {
+          min(fullLongest, maxTexture)
+        } else {
+          val base = (if (quality == "fast") viewLongest / 2 else viewLongest).toDouble()
+          // Zooming in never asks for more than PREVIEW_ZOOM_LIMIT pixels, to bound memory.
+          val zoomed = min(base * zoom, max(base, PREVIEW_ZOOM_LIMIT.toDouble()))
+          max(1, min(fullLongest, ceil(zoomed).toInt()))
         }
         val bitmap = PhotoDecoder.decode(context, src, min(target, maxTexture), info)
         renderHandler.post {
@@ -203,8 +234,18 @@ class PhotoCanvasView(context: Context, appContext: AppContext) :
             "previewHeight" to imageHeight,
             "decodeMs" to (SystemClock.elapsedRealtimeNanos() - start) / 1e6
           )
-          post { onLoad(event) }
           requestRender()
+          // A sharper texture for a crop is not a new load.
+          if (!sharpen) {
+            post {
+              if (generation != loadGeneration.get()) return@post
+              loadedSourceWidth = info.width
+              loadedSourceHeight = info.height
+              onLoad(event)
+              // The first decode didn't know the photo's size yet, so it couldn't account for the crop.
+              reloadIfNeeded()
+            }
+          }
         }
       } catch (e: Throwable) {
         post {
