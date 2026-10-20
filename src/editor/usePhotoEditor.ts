@@ -48,6 +48,8 @@ export type PhotoEditor = {
     CropOverlayProps,
     'crop' | 'sourceWidth' | 'sourceHeight' | 'onChange' | 'onGestureStart' | 'onGestureEnd'
   >;
+  /** Slider props for the current filter's intensity, 0..1. */
+  filterSliderProps: () => AdjustmentSliderProps;
   /** The underlying controller: setAdjustment, setCrop, setFilter, undo, redo, reset, getEdits… */
   controller: PhotoEditorController;
 } & Pick<
@@ -56,6 +58,7 @@ export type PhotoEditor = {
   | 'setCrop'
   | 'setFilter'
   | 'setCropping'
+  | 'setFilterIntensity'
   | 'setEdits'
   | 'update'
   | 'beginGesture'
@@ -107,11 +110,21 @@ export function usePhotoEditor(options: UsePhotoEditorOptions = {}): PhotoEditor
         onGestureStart: () => c.beginGesture(),
         onGestureEnd: () => c.endGesture(),
       }),
+      filterSliderProps: () => ({
+        value: state.present.filter?.intensity ?? 0,
+        minimumValue: 0,
+        maximumValue: 1,
+        step: 0.01,
+        onSlidingStart: () => c.beginGesture(),
+        onValueChange: (value) => c.setFilterIntensity(value),
+        onSlidingComplete: () => c.endGesture(),
+      }),
       controller: c,
       setAdjustment: (key, value) => c.setAdjustment(key, value),
       setCrop: (crop) => c.setCrop(crop),
       setFilter: (filter) => c.setFilter(filter),
       setCropping: (cropping) => c.setCropping(cropping),
+      setFilterIntensity: (intensity) => c.setFilterIntensity(intensity),
       setEdits: (stack) => c.setEdits(stack),
       update: (change) => c.update(change),
       beginGesture: () => c.beginGesture(),

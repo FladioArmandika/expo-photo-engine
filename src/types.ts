@@ -30,21 +30,49 @@ export type LoadEvent = {
 
 export type ErrorEvent = { message: string };
 
-export type ExportFormat = 'png' | 'jpeg';
+/** `heic` needs iOS 11+ on a device with a HEVC encoder, or Android 9+. */
+export type ExportFormat = 'png' | 'jpeg' | 'heic';
+
+/**
+ * Which of the original photo's metadata goes into the export: `all` (camera, lens, exposure,
+ * date, copyright and GPS location), `no-location` (the same without GPS) or `none`.
+ */
+export type ExportMetadata = 'all' | 'no-location' | 'none';
 
 export type ExportOptions = {
   format?: ExportFormat;
-  /** 0..1, JPEG only. Default 0.92. */
+  /** 0..1, JPEG and HEIC. Default 0.92. */
   quality?: number;
   /** Longest side of the output in px. 0 or undefined = full resolution (clamped to the GPU's max texture size). */
   maxDimension?: number;
+  /** Default `all`. Orientation is always reset to "up", since the pixels are already upright. */
+  metadata?: ExportMetadata;
 };
 
 export type ExportResult = {
   uri: string;
   width: number;
   height: number;
+  /**
+   * True when metadata from the original was written. False when `metadata` was `none`, the
+   * original had none, or the format can't take it (HEIC on Android, for now).
+   */
+  metadata: boolean;
   /** Decode + render + encode time, in ms. */
   totalMs: number;
   renderMs: number;
+};
+
+export type Thumbnail = {
+  /** file:// URI of a JPEG in the app's cache directory. */
+  uri: string;
+  width: number;
+  height: number;
+};
+
+export type ThumbnailOptions = {
+  /** Longest side of each thumbnail in px. Default 200. */
+  maxDimension?: number;
+  /** JPEG quality, 0..1. Default 0.8. */
+  quality?: number;
 };

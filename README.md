@@ -19,9 +19,9 @@ The engine renders the live preview and the full-resolution export natively, on 
 same result on iOS and Android.
 
 > [!WARNING]
-> **Pre-alpha.** The ten adjustments and PNG/JPEG export work and are being benchmarked on
-> devices. Filters are not built yet. Everything marked _planned_ below is the v1 target,
-> not shipped code. Don't use it in production yet.
+> **Pre-alpha.** Adjustments, crop, filters and PNG/JPEG/HEIC export work and are being benchmarked
+> on devices. Everything marked _planned_ below is the v1 target, not shipped code. Don't use it
+> in production yet.
 
 ## Why
 
@@ -88,13 +88,13 @@ general-purpose 2D canvas.
 | Imperative updates coalesced to the display refresh (60/120Hz) | ✅ spike |
 | Render stats: fps, CPU/GPU frame time, input latency, preview size | ✅ spike |
 | Exposure, contrast, highlights, shadows, saturation, vibrance, warmth, tint, sharpness, vignette | ✅ |
-| Headless export (PNG, JPEG) | ✅ spike |
+| Headless export (PNG, JPEG, HEIC) | ✅ |
 | Crop, 90° rotation, straighten, flip | ✅ |
 | Optional `CropOverlay` with drag handles and aspect lock | ✅ |
-| LUT filters with intensity, filter catalog as data, live thumbnails | planned |
+| Filters with intensity, 11 built in, your own as data, live thumbnails | ✅ |
 | Edit stack: types, validation, migration, undo/redo history | ✅ |
 | `usePhotoEditor` hook: undo/redo, unsaved-changes flag, slider wiring | ✅ |
-| HEIC export, metadata (EXIF) preservation | planned |
+| Keeps the original's metadata (EXIF, GPS optional) in exports | ✅ |
 | Cross-platform golden-image tests in CI | planned |
 
 ## Installation
@@ -167,9 +167,11 @@ const editor = usePhotoEditor({
 | `isDirty`, `markSaved()` | Unsaved changes since the start or the last `markSaved()`. |
 | `setAdjustment(key, value)` | Sets one value. Outside a gesture it is its own undo step. |
 | `beginGesture()`, `endGesture()` | Group everything in between into one undo step. Use these with your own slider or gesture code. |
+| `filterSliderProps()` | Slider props for the current filter's intensity. |
 | `setCrop(crop)`, `setFilter(filter)`, `setEdits(stack)` | One undo step each. |
 | `setCropping(on)`, `cropping` | Crop editing mode: the canvas shows the whole photo so a `CropOverlay` can sit on top. |
 | `cropOverlayProps(photo)` | Spread onto `<CropOverlay>`, with `photo` = the `onLoad` event (or any `{ sourceWidth, sourceHeight }`). One drag = one undo step. |
+| `setFilterIntensity(value)` | 0 to 1. Does nothing when no filter is set. |
 | `update(change)` | Applies a function to the current edits, e.g. `update(rotateRight)`. One undo step, or part of the gesture in progress. |
 | `reset(stack?)` | Start over (default: the original photo) with an empty history. |
 
@@ -182,12 +184,21 @@ Renders `edits` onto `source` with the same shaders as the preview and writes a 
 directory. Works without a mounted view.
 
 ```ts
-const { uri, width, height, totalMs, renderMs } = await exportImage(source, edits, {
-  format: 'jpeg',     // 'png' | 'jpeg'  (heic planned)
-  quality: 0.92,      // JPEG only
+const { uri, width, height, metadata, totalMs, renderMs } = await exportImage(source, edits, {
+  format: 'jpeg',     // 'png' | 'jpeg' | 'heic'
+  quality: 0.92,      // JPEG and HEIC
   maxDimension: 4096, // 0 = full resolution
+  metadata: 'all',    // 'all' | 'no-location' | 'none'
 });
 ```
+
+The export keeps the original's camera, lens, exposure, date and copyright metadata, and its GPS
+location unless you pass `metadata: 'no-location'`. Orientation is reset to "up" because the
+pixels are already upright, and color profile info is dropped because the output is always sRGB.
+`result.metadata` says whether anything was written.
+
+HEIC needs a device with a HEVC encoder: iOS devices from the iPhone 7 on, and Android 9 or newer.
+On Android, HEIC files don't carry metadata yet (JPEG and PNG do).
 
 ### `EditStack`
 
@@ -273,14 +284,54 @@ shows the whole photo (rotated, flipped and straightened) and the box marks the 
 the opposite corner in place and edges grow around the middle. When the photo is straightened,
 the final zoom is fitted to the chosen crop, so the result can show slightly more than the box.
 
-`filter` (LUT id + intensity) is already part of the format and validated; rendering it is
-planned. Stacks always migrate forward, so a stack saved today keeps opening in later versions.
+#### Filters
+
+```ts
+import { BUILT_IN_FILTERS, renderFilterThumbnails, registerFilters } from '@fladioarmandika/expo-photo-engine';
+
+editor.setFilter({ id: 'film', intensity: 0.8 });
+
+// A picker strip: "Original" plus every filter, rendered on the photo as currently edited.
+const thumbs = await renderFilterThumbnails(source, editor.getEdits(), { maxDimension: 160 });
+// [{ id: null, label: 'Original', uri, width, height }, { id: 'vivid', label: 'Vivid', ... }, ...]
+```
+
+Built in: `vivid`, `golden`, `nordic`, `matte`, `film`, `teal-orange`, `chrome`, `dramatic`,
+`mono`, `noir`, `sepia`. The stack stores only the id and the intensity.
+
+A filter is a small recipe, not an image file, so you can write your own:
+
+```ts
+registerFilters([
+  {
+    id: 'brand-warm',
+    label: 'Warm',
+    look: {
+      slope: [1.05, 1, 0.92],             // per-channel gain
+      offset: [0.02, 0.01, 0],            // lifts the blacks
+      contrast: 0.1,                      // -1..1
+      saturation: 1.1,                    // 1 = unchanged
+      highlightTint: [0.03, 0.01, -0.02], // color added to bright areas
+    },
+  },
+]);
+```
+
+The other fields are `power` (per-channel gamma), `shadowTint`, and `mixer` (a 3x3 channel mixer;
+three equal rows make black and white). Slope, offset and power are the ASC CDL formula colorists
+use. They run after the adjustments, in the same shader, so the preview stays one pass. A stack
+whose filter id isn't registered renders without a filter.
+
+`renderThumbnails(source, stacks, options)` is the general version: one small JPEG per stack, with
+the photo decoded once.
+
+Stacks always migrate forward, so a stack saved today keeps opening in later versions.
 
 ## How it works
 
 ```
-decode + EXIF orientation ─▶ proxy texture (sized to the view) ─▶ crop ─▶ adjustments ─▶ LUT filter ─▶ screen
-                         └─▶ full-resolution texture ───────────────────── same shaders ──────────────▶ file
+decode + EXIF orientation ─▶ proxy texture (sized to the view) ─▶ crop ─▶ adjustments ─▶ filter ─▶ screen
+                         └─▶ full-resolution texture ───────────────────── same shaders ──────────▶ file
 ```
 
 - **iOS:** ImageIO decodes straight to preview size; a Metal render pipeline draws into a
@@ -295,7 +346,7 @@ decode + EXIF orientation ─▶ proxy texture (sized to the view) ─▶ crop �
   output to photo, computed by a second shared block of shader code, so they cost nothing per
   pixel and never resample the image twice.
 - **Order:** sharpness, then exposure, white balance and vignette in linear light, then
-  highlights/shadows, contrast, saturation and vibrance on the sRGB values.
+  highlights/shadows, contrast, saturation and vibrance on the sRGB values, then the filter.
 - **Never blocks JS:** slider updates only store a value and mark the frame dirty; the native side
   draws at most once per display refresh.
 
@@ -320,9 +371,9 @@ node scripts/compare-images.mjs ios.png android.png diff.png
 
 ## Roadmap
 
-**v1:** LUT filters with thumbnails, HEIC export and metadata, golden-image tests in CI.
+**v1:** golden-image tests in CI, device benchmarks.
 
-**Later:** drawing, text, stickers, custom LUT import, masks and local adjustments, RAW, web.
+**Later:** drawing, text, stickers, `.cube` LUT import, masks and local adjustments, RAW, web.
 
 ## Development
 

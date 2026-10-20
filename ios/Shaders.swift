@@ -147,9 +147,28 @@ vec3 applyAdjustments(vec3 srgb, vec3 blur, vec2 uv, float aspect, vec4 p0, vec4
   c = luma + (c - luma) * (1.0 + p1.y * (1.0 - chroma));
   return clamp(c, 0.0, 1.0);
 }
+// Filters: a fixed look on top of the adjustments, eight vec4s packed by src/filters/looks.ts.
+// f0, f1, f2 = channel mixer rows (xyz), with intensity in f0.w, saturation in f1.w and
+// contrast in f2.w. f3, f4, f5 = slope, offset and power (the ASC CDL formula).
+// f6, f7 = color added to the shadows and to the highlights.
+// Intensity blends between the input (0) and the full look (1).
+vec3 applyFilter(vec3 c, vec4 f0, vec4 f1, vec4 f2, vec4 f3, vec4 f4, vec4 f5, vec4 f6, vec4 f7) {
+  vec3 m = vec3(dot(f0.xyz, c), dot(f1.xyz, c), dot(f2.xyz, c));
+  // The small floor keeps pow away from 0, where GPUs disagree.
+  m = pow(clamp(m * f3.xyz + f4.xyz, 0.000001, 1.0), f5.xyz);
+
+  vec3 curve = f2.w >= 0.0 ? m * m * (3.0 - 2.0 * m) : 0.5 + (m - 0.5) * 0.5;
+  m += (curve - m) * abs(f2.w);
+
+  float luma = dot(m, vec3(0.2126, 0.7152, 0.0722));
+  m = luma + (m - luma) * f1.w;
+  m += f6.xyz * (1.0 - luma) * (1.0 - luma) + f7.xyz * luma * luma;
+  return c + (clamp(m, 0.0, 1.0) - c) * f0.w;
+}
 // END SHARED ADJUSTMENTS
 
-// params[0..2] = p0, p1, p2 of applyAdjustments. params[2].z is the output's width / height.
+// params[0..2] = p0, p1, p2 of applyAdjustments (params[2].z is the output's width / height),
+// params[3..10] = f0..f7 of applyFilter.
 fragment float4 photo_fragment(VertexOut in [[stage_in]],
                                texture2d<float> image [[texture(0)]],
                                sampler imageSampler [[sampler(0)]],
@@ -167,6 +186,10 @@ fragment float4 photo_fragment(VertexOut in [[stage_in]],
   }
   float3 edited = applyAdjustments(
     color.rgb, blur, in.uv, params[2].z, params[0], params[1], params[2]);
+  if (params[3].w > 0.0) {
+    edited = applyFilter(
+      edited, params[3], params[4], params[5], params[6], params[7], params[8], params[9], params[10]);
+  }
   return float4(edited, color.a);
 }
 """

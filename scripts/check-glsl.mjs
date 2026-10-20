@@ -3,12 +3,18 @@
 // 1. The SHARED GEOMETRY and SHARED ADJUSTMENTS blocks must be identical in ios/Shaders.swift and
 //    android/.../Shaders.kt, so both platforms run the same code.
 // 2. The Android GLSL shaders (copied verbatim from Shaders.kt) run in headless Chromium's WebGL2
-//    (GLSL ES 3.00, the same language as GLES 3.0) on a test image, once per setting (adjustments
-//    and crops), and every pixel is compared with a float64 JavaScript copy of the same math.
+//    (GLSL ES 3.00, the same language as GLES 3.0) on a test image, once per setting (adjustments,
+//    crops and every built-in filter), and every pixel is compared with a float64 JavaScript copy
+//    of the same math.
 //
 //   node scripts/check-glsl.mjs   (needs `playwright-core` and a Chromium)
 import { readFileSync } from 'node:fs';
 import { chromium } from 'playwright-core';
+
+// The filter catalog is TypeScript; Node strips the types itself. Silence its notice about that.
+process.removeAllListeners('warning');
+const { BUILT_IN_FILTERS } = await import('../src/filters/catalog.ts');
+const { packLook } = await import('../src/filters/looks.ts');
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const kotlin = read('android/src/main/java/expo/modules/photoengine/Shaders.kt');
@@ -108,6 +114,22 @@ function applyAdjustments(srgb, blur, uv, aspect, a) {
   return c.map(clamp01);
 }
 
+function applyFilter(c, f) {
+  const row = (n) => f.slice(n * 4, n * 4 + 3);
+  const [intensity, saturation, contrast] = [f[3], f[7], f[11]];
+  const [slope, offset, power, shadowTint, highlightTint] = [3, 4, 5, 6, 7].map(row);
+  let m = [0, 1, 2].map((ch) => row(ch).reduce((sum, w, i) => sum + w * c[i], 0));
+  m = m.map((v, i) => Math.min(1, Math.max(0.000001, v * slope[i] + offset[i])) ** power[i]);
+  m = m.map((v) => {
+    const curve = contrast >= 0 ? v * v * (3 - 2 * v) : 0.5 + (v - 0.5) * 0.5;
+    return v + (curve - v) * Math.abs(contrast);
+  });
+  const luma = lumaOf(m);
+  m = m.map((v) => luma + (v - luma) * saturation);
+  m = m.map((v, i) => v + shadowTint[i] * (1 - luma) ** 2 + highlightTint[i] * luma ** 2);
+  return c.map((v, i) => v + (clamp01(m[i]) - v) * intensity);
+}
+
 // ---- test image: smooth gradients plus pseudo-random colors, wider than tall ----
 
 const W = 48;
@@ -175,7 +197,23 @@ const cases = [
   { name: 'straighten 5', crop: { straighten: 5 }, linear: true },
   { name: 'straighten -30 + crop', crop: { rect: [0.25, 0.25, 0.5, 0.5], straighten: -30 }, linear: true },
   { name: 'straighten 12 + rotate 90', crop: { turns: 1, straighten: 12 }, linear: true },
-].map((c) => ({ ...neutral, ...c, crop: { ...noCrop, ...c.crop }, linear: !!c.linear }));
+  // Filters.
+  ...BUILT_IN_FILTERS.map((f) => ({ name: `filter ${f.id}`, filter: packLook(f.look, 1) })),
+  { name: 'filter film 0.5', filter: packLook(BUILT_IN_FILTERS.find((f) => f.id === 'film').look, 0.5) },
+  { name: 'filter low contrast', filter: packLook({ contrast: -0.6, power: [0.8, 1, 1.2] }, 1) },
+  {
+    name: 'filter + adjustments + crop',
+    filter: packLook(BUILT_IN_FILTERS[0].look, 0.8),
+    exposure: 0.4, contrast: -0.2, saturation: 0.3,
+    crop: { rect: [0.25, 0.25, 0.5, 0.5], turns: 1 },
+  },
+].map((c) => ({
+  ...neutral,
+  ...c,
+  crop: { ...noCrop, ...c.crop },
+  linear: !!c.linear,
+  filter: c.filter ?? packLook({}, 0),
+}));
 
 const prepared = cases.map((c) => {
   const [ow, oh] = outputSize(c.crop, W, H);
@@ -248,6 +286,7 @@ const results = await page.evaluate(
       gl.uniform4fv(gl.getUniformLocation(program, 'uVParams'), new Float32Array(c.vparams));
       gl.uniform4fv(gl.getUniformLocation(program, 'uCrop'), new Float32Array(c.cropUniform));
       gl.uniform4fv(gl.getUniformLocation(program, 'uParams'), new Float32Array(c.params));
+      gl.uniform4fv(gl.getUniformLocation(program, 'uFilter'), new Float32Array(c.filter));
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       const px = new Uint8Array(c.ow * c.oh * 4);
       gl.readPixels(0, 0, c.ow, c.oh, gl.RGBA, gl.UNSIGNED_BYTE, px);
@@ -280,7 +319,8 @@ prepared.forEach((a, n) => {
             sample([src[0], src[1] - 1 / H], a.linear)[ch]) /
           4
       );
-      const expected = applyAdjustments(center, blur, uv, ow / oh, a);
+      const adjusted = applyAdjustments(center, blur, uv, ow / oh, a);
+      const expected = a.filter[3] > 0 ? applyFilter(adjusted, a.filter) : adjusted;
       for (let ch = 0; ch < 3; ch++) {
         const d = Math.abs(got[(y * ow + x) * 4 + ch] - Math.round(expected[ch] * 255));
         maxDiff = Math.max(maxDiff, d);
@@ -323,6 +363,18 @@ for (const [name, x, y, sx, sy, meaning] of known) {
   if (pixelAt(name, x, y) !== sourceAt(sx, sy)) {
     console.error(`${name}: wrong pixel at (${x}, ${y}); ${meaning}`);
     worst = Infinity;
+  }
+}
+
+// Black-and-white filters must come out exactly gray.
+for (const name of ['filter mono', 'filter noir']) {
+  const px = results.out[prepared.findIndex((a) => a.name === name)];
+  for (let i = 0; i < px.length; i += 4) {
+    if (px[i] !== px[i + 1] || px[i] !== px[i + 2]) {
+      console.error(`${name}: pixel ${i / 4} is not gray`);
+      worst = Infinity;
+      break;
+    }
   }
 }
 

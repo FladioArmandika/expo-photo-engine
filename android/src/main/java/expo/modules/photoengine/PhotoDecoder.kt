@@ -17,7 +17,7 @@ import kotlin.math.min
 internal object PhotoDecoder {
   class Info(val width: Int, val height: Int, val rawWidth: Int, val rawHeight: Int, val orientation: Int)
 
-  private fun open(context: Context, source: String): InputStream {
+  fun open(context: Context, source: String): InputStream {
     return when {
       source.startsWith("content://") -> context.contentResolver.openInputStream(Uri.parse(source))
         ?: throw IllegalArgumentException("Cannot open $source")
