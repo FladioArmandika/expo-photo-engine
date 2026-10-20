@@ -16,3 +16,10 @@ android {
     abortOnError false
   }
 }
+
+dependencies {
+  // Writes EXIF into exported JPEG and PNG files on every Android version.
+  implementation "androidx.exifinterface:exifinterface:1.3.7"
+  // HEIC export (Android 9+, uses the device's HEVC encoder).
+  implementation "androidx.heifwriter:heifwriter:1.0.0"
+}

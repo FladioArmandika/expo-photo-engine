@@ -31,6 +31,7 @@ struct ExportOptionsRecord: Record {
   @Field var format: String = "png"
   @Field var quality: Double = 0.92
   @Field var maxDimension: Int = 0
+  @Field var metadata: String = "all"
 }
 
 public class ExpoPhotoEngineModule: Module {
@@ -45,7 +46,7 @@ public class ExpoPhotoEngineModule: Module {
       let params = ShaderParams(edits)
       return try renderer.export(
         source: source, params: params, format: options.format, quality: options.quality,
-        maxDimension: options.maxDimension)
+        maxDimension: options.maxDimension, metadata: options.metadata)
     }
 
     AsyncFunction("renderThumbnailsAsync") { (source: String, edits: [EditStackRecord], options: ThumbnailOptionsRecord) -> [[String: Any]] in

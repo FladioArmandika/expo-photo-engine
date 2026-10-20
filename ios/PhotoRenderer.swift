@@ -283,19 +283,30 @@ final class PhotoRenderer: @unchecked Sendable {
   // MARK: - Export
 
   /// Headless export: decode → same shader → offscreen texture → file. No view involved.
+  /// `metadata` is "all", "no-location" (drops GPS) or "none".
   func export(
-    source: String, params: ShaderParams, format: String, quality: Double, maxDimension: Int
+    source: String, params: ShaderParams, format: String, quality: Double, maxDimension: Int,
+    metadata: String
   ) throws -> [String: Any] {
     let start = CACurrentMediaTime()
+    if format == "heic" && !Self.canWriteHeic {
+      throw PhotoEngineError.renderFailed("HEIC export is not supported on this device")
+    }
     let input = try decodeTexture(source: source, crops: [params.crop], maxDimension: maxDimension)
     let renderStart = CACurrentMediaTime()
     let image = try render(input: input, params: params)
     let renderMs = (CACurrentMediaTime() - renderStart) * 1000
-    let fileURL = try write(image, format: format, quality: quality)
+    let url = try Self.url(for: source)
+    let properties = metadata == "none"
+      ? nil
+      : Self.metadata(
+        of: url, keepLocation: metadata != "no-location", width: image.width, height: image.height)
+    let fileURL = try write(image, format: format, quality: quality, metadata: properties)
     return [
       "uri": fileURL.absoluteString,
       "width": image.width,
       "height": image.height,
+      "metadata": properties != nil,
       "totalMs": (CACurrentMediaTime() - start) * 1000,
       "renderMs": renderMs,
     ]
@@ -385,18 +396,64 @@ final class PhotoRenderer: @unchecked Sendable {
     return cgImage
   }
 
+  static let canWriteHeic: Bool = {
+    let types = CGImageDestinationCopyTypeIdentifiers() as? [String] ?? []
+    return types.contains(UTType.heic.identifier)
+  }()
+
+  /// The source photo's EXIF, TIFF, IPTC and (optionally) GPS metadata, ready to write with the
+  /// edited image. Orientation becomes "up" because the pixels are already turned upright, and the
+  /// pixel size is the edited one. Color profile entries are left out: the output is always sRGB.
+  static func metadata(of url: URL, keepLocation: Bool, width: Int, height: Int) -> [CFString: Any]? {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+          let all = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+    else { return nil }
+    var keys = [
+      kCGImagePropertyExifDictionary, kCGImagePropertyExifAuxDictionary,
+      kCGImagePropertyTIFFDictionary, kCGImagePropertyIPTCDictionary,
+    ]
+    if keepLocation {
+      keys.append(kCGImagePropertyGPSDictionary)
+    }
+    var properties: [CFString: Any] = [:]
+    for key in keys {
+      if let value = all[key] {
+        properties[key] = value
+      }
+    }
+    if properties.isEmpty { return nil }
+
+    properties[kCGImagePropertyOrientation] = 1
+    var tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
+    tiff[kCGImagePropertyTIFFOrientation] = 1
+    properties[kCGImagePropertyTIFFDictionary] = tiff
+    if var exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any] {
+      exif[kCGImagePropertyExifPixelXDimension] = width
+      exif[kCGImagePropertyExifPixelYDimension] = height
+      properties[kCGImagePropertyExifDictionary] = exif
+    }
+    return properties
+  }
+
   /// Writes `image` to a new file in the caches directory.
-  private func write(_ image: CGImage, format: String, quality: Double) throws -> URL {
-    let isJpeg = format == "jpeg"
+  private func write(
+    _ image: CGImage, format: String, quality: Double, metadata: [CFString: Any]? = nil
+  ) throws -> URL {
+    let (type, ext): (UTType, String) =
+      format == "jpeg" ? (.jpeg, "jpg") : format == "heic" ? (.heic, "heic") : (.png, "png")
     let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("ExpoPhotoEngine", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    let fileURL = directory.appendingPathComponent("\(UUID().uuidString).\(isJpeg ? "jpg" : "png")")
-    let type = (isJpeg ? UTType.jpeg : UTType.png).identifier as CFString
-    guard let destination = CGImageDestinationCreateWithURL(fileURL as CFURL, type, 1, nil) else {
+    let fileURL = directory.appendingPathComponent("\(UUID().uuidString).\(ext)")
+    guard let destination = CGImageDestinationCreateWithURL(
+      fileURL as CFURL, type.identifier as CFString, 1, nil)
+    else {
       throw PhotoEngineError.renderFailed("could not create file")
     }
-    let properties: [CFString: Any] = isJpeg ? [kCGImageDestinationLossyCompressionQuality: quality] : [:]
+    var properties = metadata ?? [:]
+    if type != .png {
+      properties[kCGImageDestinationLossyCompressionQuality] = quality
+    }
     CGImageDestinationAddImage(destination, image, properties as CFDictionary)
     guard CGImageDestinationFinalize(destination) else {
       throw PhotoEngineError.renderFailed("could not write file")

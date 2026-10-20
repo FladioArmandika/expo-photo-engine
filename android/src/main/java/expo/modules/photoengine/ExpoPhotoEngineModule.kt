@@ -37,6 +37,7 @@ class ExportOptionsRecord : Record {
   @Field val format: String = "png"
   @Field val quality: Double = 0.92
   @Field val maxDimension: Int = 0
+  @Field val metadata: String = "all"
 }
 
 internal fun EditStackRecord.toShaderParams() =
@@ -51,7 +52,7 @@ class ExpoPhotoEngineModule : Module() {
       val context = appContext.reactContext ?: throw Exceptions.ReactContextLost()
       PhotoExporter.export(
         context, source, edits.toShaderParams(),
-        options.format, options.quality, options.maxDimension
+        options.format, options.quality, options.maxDimension, options.metadata
       )
     }
 
