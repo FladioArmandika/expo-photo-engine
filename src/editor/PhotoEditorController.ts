@@ -94,8 +94,8 @@ export class PhotoEditorController {
 
   /**
    * Shows the photo before edits (on) or with them (off), for a hold-to-compare control.
-   * Only the look is dropped: adjustments and filter. The crop, rotation and straightening stay,
-   * so the two views line up and the difference is easy to see. The edits are unchanged.
+   * Everything except the crop is dropped. The crop, rotation and straightening stay, so the two
+   * views line up and the difference is easy to see. The edits are unchanged.
    */
   setComparing(comparing: boolean): void {
     if (comparing === this.comparing) return;
@@ -106,7 +106,10 @@ export class PhotoEditorController {
 
   /** The stack as the canvas should show it. */
   view(stack: EditStack): EditStack {
-    const shown = this.comparing ? { ...stack, adjustments: {}, filter: null } : stack;
+    // Only the crop is kept, so any look added to the stack later is hidden too.
+    const shown = this.comparing
+      ? { version: stack.version, crop: stack.crop, adjustments: {}, filter: null }
+      : stack;
     return this.cropping ? cropEditingView(shown) : shown;
   }
 

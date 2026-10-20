@@ -177,7 +177,7 @@ const editor = usePhotoEditor({
 | `setCrop(crop)`, `setFilter(filter)`, `setEdits(stack)` | One undo step each. |
 | `setCropping(on)`, `cropping` | Crop editing mode: the canvas shows the whole photo so a `CropOverlay` can sit on top. |
 | `cropOverlayProps(photo)` | Spread onto `<CropOverlay>`, with `photo` = the `onLoad` event (or any `{ sourceWidth, sourceHeight }`). One drag = one undo step. |
-| `compareProps`, `comparing` | Hold-to-compare. Spread onto a `Pressable` around the canvas (or a button): while held, the canvas shows the photo without adjustments and filter, at the same crop. A quick tap is ignored, so it doesn't flicker. |
+| `compareProps`, `comparing` | Hold-to-compare. Spread onto a `Pressable` around the canvas (or a button): while held, the canvas shows the photo with only the crop applied. A quick tap is ignored, so it doesn't flicker. |
 | `setComparing(on)` | The same thing, for your own gesture code. The edits don't change. |
 | `setFilterIntensity(value)` | 0 to 1. Does nothing when no filter is set. |
 | `update(change)` | Applies a function to the current edits, e.g. `update(rotateRight)`. One undo step, or part of the gesture in progress. |
@@ -302,7 +302,7 @@ Hold the photo to see it without edits:
 {editor.comparing && <Text>Original</Text>}
 ```
 
-Only the look is hidden (adjustments and filter). The crop stays, so the two views line up.
+Only the look is hidden: everything except the crop. The crop stays, so the two views line up.
 
 #### Filters
 
