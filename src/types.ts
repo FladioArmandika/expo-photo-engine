@@ -55,7 +55,7 @@ export type ExportResult = {
   height: number;
   /**
    * True when metadata from the original was written. False when `metadata` was `none`, the
-   * original had none, or the format can't take it (HEIC on Android, for now).
+   * original had none, or writing it failed.
    */
   metadata: boolean;
   /** Decode + render + encode time, in ms. */

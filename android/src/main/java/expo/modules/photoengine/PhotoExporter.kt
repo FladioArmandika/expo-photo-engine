@@ -32,9 +32,19 @@ internal object PhotoExporter {
       val renderStart = SystemClock.elapsedRealtimeNanos()
       val output = renderer.render(params)
       val renderMs = (SystemClock.elapsedRealtimeNanos() - renderStart) / 1e6
-      val file = write(context, output, format, quality)
-      val metadataKept = metadata != "none" && format != "heic" &&
-        copyMetadata(context, source, file, metadata != "no-location", output.width, output.height)
+      val keepLocation = metadata != "no-location"
+      // HEIC carries EXIF inside the file as it is written; JPEG and PNG get it afterwards.
+      val heicExif = if (format == "heic" && metadata != "none") {
+        exifBlock(context, source, keepLocation, output.width, output.height)
+      } else {
+        null
+      }
+      val (file, exifWritten) = write(context, output, format, quality, heicExif)
+      val metadataKept = when {
+        metadata == "none" -> false
+        format == "heic" -> exifWritten
+        else -> copyMetadata(context, source, file, keepLocation, output.width, output.height)
+      }
       mapOf(
         "uri" to Uri.fromFile(file).toString(),
         "width" to output.width,
@@ -54,7 +64,7 @@ internal object PhotoExporter {
     return withRenderer(context, source, params.map { it.crop }, maxDimension) { renderer ->
       params.map { p ->
         val output = renderer.render(p)
-        val file = write(context, output, "jpeg", quality)
+        val (file) = write(context, output, "jpeg", quality)
         mapOf<String, Any>(
           "uri" to Uri.fromFile(file).toString(),
           "width" to output.width,
@@ -100,7 +110,10 @@ internal object PhotoExporter {
     }
   }
 
-  private fun write(context: Context, bitmap: Bitmap, format: String, quality: Double): File {
+  /** Writes [bitmap] to a new cache file. The Boolean says whether [heicExif] went into a HEIC file. */
+  private fun write(
+    context: Context, bitmap: Bitmap, format: String, quality: Double, heicExif: ByteArray? = null
+  ): Pair<File, Boolean> {
     val extension = when (format) {
       "jpeg" -> "jpg"
       "heic" -> "heic"
@@ -110,8 +123,7 @@ internal object PhotoExporter {
     val file = File(directory, "${UUID.randomUUID()}.$extension")
     val percent = (quality * 100).toInt().coerceIn(0, 100)
     if (format == "heic") {
-      writeHeic(bitmap, file, percent)
-      return file
+      return file to writeHeic(bitmap, file, percent, heicExif)
     }
     FileOutputStream(file).use {
       bitmap.compress(
@@ -120,11 +132,11 @@ internal object PhotoExporter {
         it
       )
     }
-    return file
+    return file to false
   }
 
   /** Android has no HEIC option in Bitmap.compress; HeifWriter encodes with the device's HEVC encoder. */
-  private fun writeHeic(bitmap: Bitmap, file: File, quality: Int) {
+  private fun writeHeic(bitmap: Bitmap, file: File, quality: Int, exif: ByteArray?): Boolean {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
       throw IllegalStateException("HEIC export needs Android 9 or newer")
     }
@@ -132,13 +144,61 @@ internal object PhotoExporter {
       .setQuality(quality)
       .setMaxImages(1)
       .build()
+    var exifWritten = false
     try {
       writer.start()
       writer.addBitmap(bitmap)
+      if (exif != null) {
+        // Metadata is a bonus: a writer that refuses it should not cost the photo.
+        exifWritten = try {
+          writer.addExifData(0, exif, 0, exif.size)
+          true
+        } catch (e: Exception) {
+          false
+        }
+      }
       writer.stop(30_000)
     } finally {
       writer.close()
     }
+    return exifWritten
+  }
+
+  /**
+   * The source photo's EXIF as one block ("Exif\0\0" followed by the TIFF data), the form HEIC
+   * files store it in. ExifInterface can't write HEIC, so the tags are written into a throwaway
+   * 1x1 JPEG with [copyMetadata] and its EXIF segment is lifted out.
+   */
+  private fun exifBlock(
+    context: Context, source: String, keepLocation: Boolean, width: Int, height: Int
+  ): ByteArray? {
+    val scratch = File.createTempFile("exif", ".jpg", context.cacheDir)
+    try {
+      val pixel = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+      FileOutputStream(scratch).use { pixel.compress(Bitmap.CompressFormat.JPEG, 50, it) }
+      pixel.recycle()
+      if (!copyMetadata(context, source, scratch, keepLocation, width, height)) return null
+      return jpegExifSegment(scratch.readBytes())
+    } finally {
+      scratch.delete()
+    }
+  }
+
+  /** The payload of a JPEG's APP1 "Exif" segment, or null when it has none. */
+  private fun jpegExifSegment(jpeg: ByteArray): ByteArray? {
+    var i = 2 // after the SOI marker
+    while (i + 4 <= jpeg.size && jpeg[i] == 0xFF.toByte()) {
+      val marker = jpeg[i + 1].toInt() and 0xFF
+      val length = ((jpeg[i + 2].toInt() and 0xFF) shl 8) or (jpeg[i + 3].toInt() and 0xFF)
+      val start = i + 4
+      val end = i + 2 + length
+      if (end > jpeg.size || marker == 0xDA) return null // start of the image data: no EXIF
+      if (marker == 0xE1 && length >= 8 && String(jpeg, start, 4, Charsets.US_ASCII) == "Exif") {
+        return jpeg.copyOfRange(start, end)
+      }
+      i = end
+    }
+    return null
   }
 
   /**
