@@ -7,15 +7,15 @@ package expo.modules.photoengine
 // formats, so the two GPUs see exactly the same numbers and no platform color conversion
 // sneaks in.
 internal object Shaders {
-  // One quad as a 4-vertex triangle strip built from gl_VertexID (no vertex buffers), scaled to
+  // One quad as a 4-vertex triangle strip (corners from a small vertex buffer), scaled to
   // aspect-fit the target. uVParams = (scale x, scale y, 1 to flip vertically,
   // texture width / height), uCrop = crop rect and geo (see cropToSource).
   const val VERTEX = """#version 300 es
 uniform vec4 uVParams;
 uniform vec4 uCrop[2];
 out vec2 vUv;
+layout(location = 0) in vec2 aCorner;
 out vec2 vSrcUv;
-const vec2 corners[4] = vec2[4](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(-1.0, 1.0), vec2(1.0, 1.0));
 
 // BEGIN SHARED GEOMETRY
 // Identical in ios/Shaders.swift and android/.../Shaders.kt, like SHARED ADJUSTMENTS below.
@@ -70,7 +70,7 @@ vec2 cropToSource(vec2 outUv, vec4 rect, vec4 geo, float srcAspect) {
 // END SHARED GEOMETRY
 
 void main() {
-  vec2 p = corners[gl_VertexID];
+  vec2 p = aCorner;
   gl_Position = vec4(p * uVParams.xy, 0.0, 1.0);
   // Clip-space top (y = +1) shows the top of the output (v = 0).
   vUv = vec2((p.x + 1.0) * 0.5, (1.0 - p.y) * 0.5);

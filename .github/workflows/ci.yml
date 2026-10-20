@@ -35,7 +35,7 @@ jobs:
           node scripts/check-glsl.mjs
 
   android:
-    name: Android build
+    name: Android build and golden export
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,9 +56,29 @@ jobs:
       - name: Assemble example app (compiles the module's Kotlin)
         run: ./gradlew assembleDebug --no-daemon
         working-directory: example/android
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Export the golden images on the emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: adb install -r example/android/app/build/outputs/apk/debug/app-debug.apk && scripts/golden-run.sh android - golden/android
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: golden-android
+          path: golden/android
+          if-no-files-found: ignore
 
   ios:
-    name: iOS build
+    name: iOS build and golden export
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -84,4 +104,46 @@ jobs:
           set -o pipefail
           xcodebuild -workspace "$workspace" -scheme "$scheme" -configuration Debug \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO build | tail -200
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build | tail -200
+      - name: Export the golden images on the simulator
+        run: |
+          app=$(find example/ios/build/Build/Products -maxdepth 2 -name '*.app' | head -1)
+          udid=$(xcrun simctl list devices available -j \
+            | node -e 'const d=JSON.parse(require("fs").readFileSync(0)).devices; console.log(Object.entries(d).filter(([r])=>r.includes("iOS")).flatMap(([,l])=>l).find((x)=>x.name.startsWith("iPhone")).udid)')
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          xcrun simctl install "$udid" "$app"
+          scripts/golden-run.sh ios "$udid" golden/ios
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: golden-ios
+          path: golden/ios
+          if-no-files-found: ignore
+
+  golden:
+    name: iOS vs Android golden images
+    needs: [android, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: golden-ios
+          path: golden/ios
+      - uses: actions/download-artifact@v4
+        with:
+          name: golden-android
+          path: golden/android
+      - run: node scripts/golden-compare.mjs golden/ios golden/android golden/diff
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: golden-diff
+          path: golden/diff
+          if-no-files-found: ignore
