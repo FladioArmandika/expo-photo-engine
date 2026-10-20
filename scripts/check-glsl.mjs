@@ -257,6 +257,11 @@ const results = await page.evaluate(
       throw new Error(gl.getProgramInfoLog(program));
     gl.useProgram(program);
     gl.bindVertexArray(gl.createVertexArray());
+    // Same quad corners as the vertex buffer in GlPhotoProgram.kt.
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
     // Same texture setup as the export path: clamped edges, 1:1 output.
     const input = gl.createTexture();

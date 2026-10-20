@@ -3,6 +3,8 @@ package expo.modules.photoengine
 import android.graphics.Bitmap
 import android.opengl.GLES30
 import android.opengl.GLUtils
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 /** The compiled edit shader plus the GL objects needed to draw one image. GL-thread only. */
 internal class GlPhotoProgram {
@@ -13,6 +15,7 @@ internal class GlPhotoProgram {
   private val uFilter: Int
   private val uImage: Int
   private val vertexArray: Int
+  private val vertexBuffer: Int
 
   init {
     val vertex = compile(GLES30.GL_VERTEX_SHADER, Shaders.VERTEX)
@@ -33,10 +36,24 @@ internal class GlPhotoProgram {
     uFilter = GLES30.glGetUniformLocation(program, "uFilter")
     uImage = GLES30.glGetUniformLocation(program, "uImage")
 
-    // The quad comes from gl_VertexID, but some drivers still refuse to draw without a VAO bound.
+    // The quad's corners come from a real vertex buffer. Building them from gl_VertexID with no
+    // attributes enabled draws nothing on some GLES implementations (the Android emulator's).
     val arrays = IntArray(1)
     GLES30.glGenVertexArrays(1, arrays, 0)
     vertexArray = arrays[0]
+    GLES30.glBindVertexArray(vertexArray)
+    val buffers = IntArray(1)
+    GLES30.glGenBuffers(1, buffers, 0)
+    vertexBuffer = buffers[0]
+    val corners = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
+    val data = ByteBuffer.allocateDirect(corners.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+    data.put(corners).position(0)
+    GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, vertexBuffer)
+    GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, corners.size * 4, data, GLES30.GL_STATIC_DRAW)
+    GLES30.glEnableVertexAttribArray(0)
+    GLES30.glVertexAttribPointer(0, 2, GLES30.GL_FLOAT, false, 0, 0)
+    GLES30.glBindVertexArray(0)
+    GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, 0)
   }
 
   /**
@@ -73,6 +90,7 @@ internal class GlPhotoProgram {
   fun release() {
     GLES30.glDeleteProgram(program)
     GLES30.glDeleteVertexArrays(1, intArrayOf(vertexArray), 0)
+    GLES30.glDeleteBuffers(1, intArrayOf(vertexBuffer), 0)
   }
 
   companion object {

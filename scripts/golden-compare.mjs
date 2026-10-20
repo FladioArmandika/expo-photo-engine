@@ -23,6 +23,12 @@ const ios = pngs(iosDir);
 const android = pngs(androidDir);
 const names = [...new Set([...ios, ...android])].sort();
 
+const average = (png) => {
+  const sum = [0, 0, 0, 0];
+  for (let i = 0; i < png.data.length; i++) sum[i % 4] += png.data[i];
+  return sum.map((v) => Math.round(v / (png.width * png.height))).join(',');
+};
+
 let failed = false;
 const rows = [];
 for (const file of names) {
@@ -54,7 +60,11 @@ for (const file of names) {
   writeFileSync(join(diffDir, file), PNG.sync.write(diff));
   const pixels = a.width * a.height;
   const ok = max <= MAX_DIFF;
-  if (!ok) failed = true;
+  if (!ok) {
+    failed = true;
+    // The average color of each side tells a blank or tinted export apart from a small drift.
+    console.log(`${name}: average RGBA iOS ${average(a)}, Android ${average(b)}`);
+  }
   rows.push([
     name,
     `${a.width}x${a.height}`,
