@@ -128,8 +128,6 @@ final class PhotoRenderer: @unchecked Sendable {
   let screenPipeline: MTLRenderPipelineState
   /// Pipeline that draws into an offscreen RGBA texture for export.
   let exportPipeline: MTLRenderPipelineState
-  let linearSampler: MTLSamplerState
-  let nearestSampler: MTLSamplerState
 
   private init() throws {
     guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else {
@@ -157,20 +155,7 @@ final class PhotoRenderer: @unchecked Sendable {
     }
     screenPipeline = try makePipeline(.bgra8Unorm)
     exportPipeline = try makePipeline(.rgba8Unorm)
-
-    func makeSampler(_ filter: MTLSamplerMinMagFilter) -> MTLSamplerState? {
-      let descriptor = MTLSamplerDescriptor()
-      descriptor.minFilter = filter
-      descriptor.magFilter = filter
-      descriptor.sAddressMode = .clampToEdge
-      descriptor.tAddressMode = .clampToEdge
-      return device.makeSamplerState(descriptor: descriptor)
-    }
-    guard let linear = makeSampler(.linear), let nearest = makeSampler(.nearest) else {
-      throw PhotoEngineError.noMetalDevice
-    }
-    linearSampler = linear
-    nearestSampler = nearest
+    // No sampler states: the shader reads and blends pixels itself (see sampleImage).
   }
 
   // MARK: - Decoding
@@ -256,8 +241,8 @@ final class PhotoRenderer: @unchecked Sendable {
   /// Encodes one draw of `texture` with `params` into `encoder`: the cropped image,
   /// aspect-fitted to `targetSize`.
   func encodeDraw(
-    _ encoder: MTLRenderCommandEncoder, pipeline: MTLRenderPipelineState, sampler: MTLSamplerState,
-    texture: MTLTexture, params: ShaderParams, targetSize: CGSize, flipY: Bool = false
+    _ encoder: MTLRenderCommandEncoder, pipeline: MTLRenderPipelineState, texture: MTLTexture,
+    params: ShaderParams, targetSize: CGSize, flipY: Bool = false
   ) {
     let output = params.crop.outputSize(width: texture.width, height: texture.height)
     let imageAspect = Float(output.width) / Float(output.height)
@@ -276,7 +261,6 @@ final class PhotoRenderer: @unchecked Sendable {
     encoder.setVertexBytes(&vparams, length: MemoryLayout<SIMD4<Float>>.stride * vparams.count, index: 0)
     encoder.setFragmentBytes(&fparams, length: MemoryLayout<SIMD4<Float>>.stride * fparams.count, index: 0)
     encoder.setFragmentTexture(texture, index: 0)
-    encoder.setFragmentSamplerState(sampler, index: 0)
     encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
   }
 
@@ -364,11 +348,8 @@ final class PhotoRenderer: @unchecked Sendable {
     guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
       throw PhotoEngineError.renderFailed("could not create encoder")
     }
-    // Without straightening every output pixel lands on exactly one input pixel, so nearest
-    // sampling copies it exactly. A straightened image falls between pixels and needs filtering.
-    let sampler = params.crop.straighten == 0 ? nearestSampler : linearSampler
     encodeDraw(
-      encoder, pipeline: exportPipeline, sampler: sampler, texture: input, params: params,
+      encoder, pipeline: exportPipeline, texture: input, params: params,
       targetSize: CGSize(width: width, height: height))
     encoder.endEncoding()
     commandBuffer.commit()

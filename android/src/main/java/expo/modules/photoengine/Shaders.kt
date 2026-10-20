@@ -172,17 +172,37 @@ vec3 applyFilter(vec3 c, vec4 f0, vec4 f1, vec4 f2, vec4 f3, vec4 f4, vec4 f5, v
 }
 // END SHARED ADJUSTMENTS
 
+// Bilinear read done in the shader instead of by the GPU's sampler. Every GPU blends with its own
+// weight precision, which made straightened crops differ by a few levels on hard edges between
+// iOS and Android. Here the weights are rounded to 1/256 the same way on both, and at a pixel
+// center they round to exactly 0 or 1, so an unstraightened crop copies pixels unchanged.
+// Mirrors sampleImage in ios/Shaders.swift.
+vec4 sampleImage(vec2 uv) {
+  ivec2 size = textureSize(uImage, 0);
+  ivec2 last = size - 1;
+  vec2 pos = uv * vec2(size) - 0.5;
+  vec2 base = floor(pos);
+  vec2 f = floor((pos - base) * 256.0 + 0.5) / 256.0;
+  ivec2 p0 = clamp(ivec2(base), ivec2(0), last);
+  ivec2 p1 = clamp(ivec2(base) + 1, ivec2(0), last);
+  vec4 a = texelFetch(uImage, p0, 0);
+  vec4 b = texelFetch(uImage, ivec2(p1.x, p0.y), 0);
+  vec4 c = texelFetch(uImage, ivec2(p0.x, p1.y), 0);
+  vec4 d = texelFetch(uImage, p1, 0);
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
 void main() {
   vec2 size = vec2(textureSize(uImage, 0));
-  vec4 color = texture(uImage, vSrcUv);
+  vec4 color = sampleImage(vSrcUv);
   vec3 blur = color.rgb;
   // Only pay for the 4 extra reads when sharpening is on. The branch is uniform per draw.
   if (uParams[2].x > 0.0) {
     vec2 texel = 1.0 / size;
-    blur = (texture(uImage, vSrcUv + vec2(texel.x, 0.0)).rgb
-          + texture(uImage, vSrcUv - vec2(texel.x, 0.0)).rgb
-          + texture(uImage, vSrcUv + vec2(0.0, texel.y)).rgb
-          + texture(uImage, vSrcUv - vec2(0.0, texel.y)).rgb) * 0.25;
+    blur = (sampleImage(vSrcUv + vec2(texel.x, 0.0)).rgb
+          + sampleImage(vSrcUv - vec2(texel.x, 0.0)).rgb
+          + sampleImage(vSrcUv + vec2(0.0, texel.y)).rgb
+          + sampleImage(vSrcUv - vec2(0.0, texel.y)).rgb) * 0.25;
   }
   vec3 edited = applyAdjustments(
     color.rgb, blur, vUv, uParams[2].z, uParams[0], uParams[1], uParams[2]);

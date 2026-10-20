@@ -246,7 +246,7 @@ final class PhotoCanvasView: ExpoView {
     pass.colorAttachments[0].storeAction = .store
     guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return }
     renderer.encodeDraw(
-      encoder, pipeline: renderer.screenPipeline, sampler: renderer.linearSampler, texture: texture,
+      encoder, pipeline: renderer.screenPipeline, texture: texture,
       params: params, targetSize: layer.drawableSize)
     encoder.endEncoding()
 

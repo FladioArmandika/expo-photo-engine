@@ -155,15 +155,15 @@ const texel = (x, y) => {
   const i = (cy * W + cx) * 4;
   return [image[i] / 255, image[i + 1] / 255, image[i + 2] / 255];
 };
-// What the GPU's sampler returns at uv: nearest, or bilinear between texel centers (clamped edges).
-const sample = ([u, v], linear) => {
-  if (!linear) return texel(Math.floor(u * W), Math.floor(v * H));
+// sampleImage in the shaders: bilinear between texel centers (clamped edges), with the weights
+// rounded to 1/256.
+const sample = ([u, v]) => {
   const x = u * W - 0.5;
   const y = v * H - 0.5;
   const x0 = Math.floor(x);
   const y0 = Math.floor(y);
-  const fx = x - x0;
-  const fy = y - y0;
+  const fx = Math.floor((x - x0) * 256 + 0.5) / 256;
+  const fy = Math.floor((y - y0) * 256 + 0.5) / 256;
   const a = texel(x0, y0), b = texel(x0 + 1, y0), c = texel(x0, y0 + 1), d = texel(x0 + 1, y0 + 1);
   return [0, 1, 2].map((ch) => (a[ch] * (1 - fx) + b[ch] * fx) * (1 - fy) + (c[ch] * (1 - fx) + d[ch] * fx) * fy);
 };
@@ -193,10 +193,10 @@ const cases = [
   { name: 'crop + rotate 270 + flip V', crop: { rect: [0, 0.5, 0.75, 0.5], turns: 3, flipV: true } },
   { name: 'crop + vignette', crop: { rect: [0.5, 0, 0.5, 1] }, vignette: -1 },
   { name: 'crop + sharpness', crop: { rect: [0.25, 0.25, 0.5, 0.5], turns: 2 }, sharpness: 0.6 },
-  // Straightened images fall between pixels, so these use linear sampling like the export does.
-  { name: 'straighten 5', crop: { straighten: 5 }, linear: true },
-  { name: 'straighten -30 + crop', crop: { rect: [0.25, 0.25, 0.5, 0.5], straighten: -30 }, linear: true },
-  { name: 'straighten 12 + rotate 90', crop: { turns: 1, straighten: 12 }, linear: true },
+  // Straightened images fall between pixels, so these exercise the blending in sampleImage.
+  { name: 'straighten 5', crop: { straighten: 5 } },
+  { name: 'straighten -30 + crop', crop: { rect: [0.25, 0.25, 0.5, 0.5], straighten: -30 } },
+  { name: 'straighten 12 + rotate 90', crop: { turns: 1, straighten: 12 } },
   // Filters.
   ...BUILT_IN_FILTERS.map((f) => ({ name: `filter ${f.id}`, filter: packLook(f.look, 1) })),
   { name: 'filter film 0.5', filter: packLook(BUILT_IN_FILTERS.find((f) => f.id === 'film').look, 0.5) },
@@ -211,7 +211,6 @@ const cases = [
   ...neutral,
   ...c,
   crop: { ...noCrop, ...c.crop },
-  linear: !!c.linear,
   filter: c.filter ?? packLook({}, 0),
 }));
 
@@ -270,16 +269,15 @@ const results = await page.evaluate(
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(image));
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    // Like uploadTexture in GlPhotoProgram.kt. The shader blends pixels itself, but without a
+    // non-mipmap filter the texture would be incomplete and read as black.
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.uniform1i(gl.getUniformLocation(program, 'uImage'), 0);
     gl.bindFramebuffer(gl.FRAMEBUFFER, gl.createFramebuffer());
 
     const out = [];
     for (const c of cases) {
-      const filter = c.linear ? gl.LINEAR : gl.NEAREST;
-      gl.bindTexture(gl.TEXTURE_2D, input);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
-
       const output = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, output);
       gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, c.ow, c.oh);
@@ -315,13 +313,13 @@ prepared.forEach((a, n) => {
     for (let x = 0; x < ow; x++) {
       const uv = [(x + 0.5) / ow, (y + 0.5) / oh];
       const src = cropToSource(uv, a.crop, W / H);
-      const center = sample(src, a.linear);
+      const center = sample(src);
       const blur = [0, 1, 2].map(
         (ch) =>
-          (sample([src[0] + 1 / W, src[1]], a.linear)[ch] +
-            sample([src[0] - 1 / W, src[1]], a.linear)[ch] +
-            sample([src[0], src[1] + 1 / H], a.linear)[ch] +
-            sample([src[0], src[1] - 1 / H], a.linear)[ch]) /
+          (sample([src[0] + 1 / W, src[1]])[ch] +
+            sample([src[0] - 1 / W, src[1]])[ch] +
+            sample([src[0], src[1] + 1 / H])[ch] +
+            sample([src[0], src[1] - 1 / H])[ch]) /
           4
       );
       const adjusted = applyAdjustments(center, blur, uv, ow / oh, a);
@@ -333,9 +331,7 @@ prepared.forEach((a, n) => {
       }
     }
   }
-  // Bilinear filtering runs at reduced precision on GPUs, so straightened cases get 2/255 of slack.
-  const limit = a.linear ? 2 : 1;
-  if (maxDiff > limit) worst = Infinity;
+  if (maxDiff > 1) worst = Infinity;
   const total = ow * oh * 3;
   console.log(
     `${a.name.padEnd(27)} ${String(ow).padStart(2)}x${String(oh).padEnd(2)} max |GPU - reference| = ${maxDiff}/255, off: ${String(off).padStart(4)}/${total}`

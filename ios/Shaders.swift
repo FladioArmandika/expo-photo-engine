@@ -167,22 +167,41 @@ vec3 applyFilter(vec3 c, vec4 f0, vec4 f1, vec4 f2, vec4 f3, vec4 f4, vec4 f5, v
 }
 // END SHARED ADJUSTMENTS
 
+// Bilinear read done in the shader instead of by the GPU's sampler. Every GPU blends with its own
+// weight precision, which made straightened crops differ by a few levels on hard edges between
+// iOS and Android. Here the weights are rounded to 1/256 the same way on both, and at a pixel
+// center they round to exactly 0 or 1, so an unstraightened crop copies pixels unchanged.
+// Mirrors sampleImage in android/.../Shaders.kt.
+float4 sampleImage(texture2d<float> image, float2 uv) {
+  int2 size = int2(image.get_width(), image.get_height());
+  int2 last = size - 1;
+  float2 pos = uv * float2(size) - 0.5;
+  float2 base = floor(pos);
+  float2 f = floor((pos - base) * 256.0 + 0.5) / 256.0;
+  uint2 p0 = uint2(clamp(int2(base), int2(0), last));
+  uint2 p1 = uint2(clamp(int2(base) + 1, int2(0), last));
+  float4 a = image.read(p0);
+  float4 b = image.read(uint2(p1.x, p0.y));
+  float4 c = image.read(uint2(p0.x, p1.y));
+  float4 d = image.read(p1);
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
 // params[0..2] = p0, p1, p2 of applyAdjustments (params[2].z is the output's width / height),
 // params[3..10] = f0..f7 of applyFilter.
 fragment float4 photo_fragment(VertexOut in [[stage_in]],
                                texture2d<float> image [[texture(0)]],
-                               sampler imageSampler [[sampler(0)]],
                                constant float4 *params [[buffer(0)]]) {
   float2 size = float2(image.get_width(), image.get_height());
-  float4 color = image.sample(imageSampler, in.srcUv);
+  float4 color = sampleImage(image, in.srcUv);
   float3 blur = color.rgb;
   // Only pay for the 4 extra reads when sharpening is on. The branch is uniform per draw.
   if (params[2].x > 0.0) {
     float2 texel = 1.0 / size;
-    blur = (image.sample(imageSampler, in.srcUv + float2(texel.x, 0.0)).rgb
-          + image.sample(imageSampler, in.srcUv - float2(texel.x, 0.0)).rgb
-          + image.sample(imageSampler, in.srcUv + float2(0.0, texel.y)).rgb
-          + image.sample(imageSampler, in.srcUv - float2(0.0, texel.y)).rgb) * 0.25;
+    blur = (sampleImage(image, in.srcUv + float2(texel.x, 0.0)).rgb
+          + sampleImage(image, in.srcUv - float2(texel.x, 0.0)).rgb
+          + sampleImage(image, in.srcUv + float2(0.0, texel.y)).rgb
+          + sampleImage(image, in.srcUv - float2(0.0, texel.y)).rgb) * 0.25;
   }
   float3 edited = applyAdjustments(
     color.rgb, blur, in.uv, params[2].z, params[0], params[1], params[2]);

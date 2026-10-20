@@ -326,7 +326,7 @@ class PhotoCanvasView(context: Context, appContext: AppContext) :
     GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
     program.draw(
       imageTexture, imageWidth, imageHeight, surfaceWidth, surfaceHeight,
-      params, flipY = false, nearest = false
+      params, flipY = false
     )
     core.swapBuffers(window)
     val end = System.nanoTime()
