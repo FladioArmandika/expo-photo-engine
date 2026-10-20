@@ -9,6 +9,7 @@ export type { PhotoCanvasProps, PhotoCanvasRef } from './PhotoCanvas';
 export * from './types';
 export * from './edit-stack';
 export * from './editor';
+export * from './crop';
 export * from './filters';
 
 /**

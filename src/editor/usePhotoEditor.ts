@@ -2,6 +2,7 @@ import { useMemo, useState, useSyncExternalStore } from 'react';
 
 import type { PhotoCanvasRef } from '../PhotoCanvas';
 import { PhotoEditorController } from './PhotoEditorController';
+import type { CropOverlayProps } from '../crop/CropOverlay';
 import { migrateEditStack } from '../edit-stack/migrate';
 import { ADJUSTMENTS, type AdjustmentKey, type EditStack } from '../edit-stack/types';
 
@@ -34,6 +35,19 @@ export type PhotoEditor = {
   isDirty: boolean;
   /** Ready-made slider props for one adjustment: range, live preview and one undo step per drag. */
   sliderProps: (key: AdjustmentKey) => AdjustmentSliderProps;
+  /** True while the crop is being edited (see setCropping). */
+  cropping: boolean;
+  /**
+   * Spread onto <CropOverlay>, with the photo size from PhotoCanvas `onLoad`. Each drag is one
+   * undo step.
+   */
+  cropOverlayProps: (photo: {
+    sourceWidth: number;
+    sourceHeight: number;
+  }) => Pick<
+    CropOverlayProps,
+    'crop' | 'sourceWidth' | 'sourceHeight' | 'onChange' | 'onGestureStart' | 'onGestureEnd'
+  >;
   /** Slider props for the current filter's intensity, 0..1. */
   filterSliderProps: () => AdjustmentSliderProps;
   /** The underlying controller: setAdjustment, setCrop, setFilter, undo, redo, reset, getEdits… */
@@ -43,6 +57,7 @@ export type PhotoEditor = {
   | 'setAdjustment'
   | 'setCrop'
   | 'setFilter'
+  | 'setCropping'
   | 'setFilterIntensity'
   | 'setEdits'
   | 'update'
@@ -72,7 +87,7 @@ export function usePhotoEditor(options: UsePhotoEditorOptions = {}): PhotoEditor
   return useMemo(() => {
     const c = controller;
     return {
-      canvasProps: { ref: c.attachCanvas, edits: state.present },
+      canvasProps: { ref: c.attachCanvas, edits: c.view(state.present) },
       edits: state.present,
       canUndo: state.canUndo,
       canRedo: state.canRedo,
@@ -85,6 +100,15 @@ export function usePhotoEditor(options: UsePhotoEditorOptions = {}): PhotoEditor
         onSlidingStart: () => c.beginGesture(),
         onValueChange: (value) => c.setAdjustment(key, value),
         onSlidingComplete: () => c.endGesture(),
+      }),
+      cropping: state.cropping,
+      cropOverlayProps: ({ sourceWidth, sourceHeight }) => ({
+        crop: state.present.crop,
+        sourceWidth,
+        sourceHeight,
+        onChange: (crop) => c.setCrop(crop),
+        onGestureStart: () => c.beginGesture(),
+        onGestureEnd: () => c.endGesture(),
       }),
       filterSliderProps: () => ({
         value: state.present.filter?.intensity ?? 0,
@@ -99,6 +123,7 @@ export function usePhotoEditor(options: UsePhotoEditorOptions = {}): PhotoEditor
       setAdjustment: (key, value) => c.setAdjustment(key, value),
       setCrop: (crop) => c.setCrop(crop),
       setFilter: (filter) => c.setFilter(filter),
+      setCropping: (cropping) => c.setCropping(cropping),
       setFilterIntensity: (intensity) => c.setFilterIntensity(intensity),
       setEdits: (stack) => c.setEdits(stack),
       update: (change) => c.update(change),
