@@ -119,7 +119,12 @@ npm install @fladioarmandika/expo-photo-engine
 npx pod-install
 ```
 
-**Minimum versions:** iOS 16.4 (set by Expo SDK 58), Android 7.0 / API 24 (tested from API 26).
+**Minimum versions:** Expo SDK 58 / React Native 0.88, iOS 16.4, Android 7.0 / API 24 (tested
+from API 26).
+
+**New Architecture only.** The module and the `PhotoCanvas` view are built on the New
+Architecture (Fabric and TurboModules), which is the default and the only option from SDK 58 on.
+There is no fallback for the old bridge.
 
 ## API
 
