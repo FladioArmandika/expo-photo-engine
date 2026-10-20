@@ -176,13 +176,12 @@ function applyHsl(c, h) {
   return rgb.map(clamp01);
 }
 
-// Line for line with curveAt and applyCurves. k is the 136 numbers from packCurves.
+// Line for line with applyCurves. k is the 136 numbers from packCurves.
 function curveAt(k, x, channel) {
   const pos = clamp01(x) * 32;
-  const i = Math.min(Math.floor(pos), 31);
-  const a = k[(1 + i) * 4 + channel];
-  const b = k[(2 + i) * 4 + channel];
-  return a + (b - a) * (pos - i);
+  let sum = 0;
+  for (let i = 0; i <= 32; i++) sum += Math.max(1 - Math.abs(pos - i), 0) * k[(1 + i) * 4 + channel];
+  return sum;
 }
 function applyCurves(c, k) {
   const rgb = c.map((v) => curveAt(k, v, 0));

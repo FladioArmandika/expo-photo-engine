@@ -233,18 +233,25 @@ vec3 applyFilter(vec3 c, vec4 f0, vec4 f1, vec4 f2, vec4 f3, vec4 f4, vec4 f5, v
 
 // Tone curves, packed by packCurves in src/edit-stack/curves.ts: uCurves[0].x = 1 when any curve
 // is set, then uCurves[1 + k] holds the rgb, red, green and blue curves (x, y, z, w) at input
-// k / 32. In between, the samples are blended linearly. Not in the shared block because Metal
-// reads the samples through a pointer instead of a uniform array.
-// Mirrors applyCurves in ios/Shaders.swift.
-float curveAt(float x, int channel) {
-  float pos = clamp(x, 0.0, 1.0) * 32.0;
-  int i = min(int(pos), 31);
-  return mix(uCurves[1 + i][channel], uCurves[2 + i][channel], pos - float(i));
-}
-
+// k / 32. In between, the samples are blended linearly: each sample k gets the weight
+// max(0, 1 - |32 x - k|), so at most two samples count and their weights add up to 1.
+// Looping over every sample costs a little more than reading the two nearest ones, but the
+// array index is then the same for every pixel. Indexing it per pixel gave scrambled colors on
+// some pixels with the Android emulator's GPU.
+// Not in the shared block because Metal reads the samples through a pointer instead of a uniform
+// array. Mirrors applyCurves in ios/Shaders.swift.
 vec3 applyCurves(vec3 c) {
-  c = vec3(curveAt(c.r, 0), curveAt(c.g, 0), curveAt(c.b, 0));
-  return vec3(curveAt(c.r, 1), curveAt(c.g, 2), curveAt(c.b, 3));
+  vec3 pos = clamp(c, 0.0, 1.0) * 32.0;
+  vec3 rgb = vec3(0.0);
+  for (int k = 0; k <= 32; k++) {
+    rgb += max(1.0 - abs(pos - float(k)), 0.0) * uCurves[1 + k].x;
+  }
+  pos = clamp(rgb, 0.0, 1.0) * 32.0;
+  vec3 result = vec3(0.0);
+  for (int k = 0; k <= 32; k++) {
+    result += max(1.0 - abs(pos - float(k)), 0.0) * uCurves[1 + k].yzw;
+  }
+  return result;
 }
 
 // Bilinear read done in the shader instead of by the GPU's sampler. Every GPU blends with its own

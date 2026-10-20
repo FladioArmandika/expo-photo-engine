@@ -225,17 +225,21 @@ vec3 applyFilter(vec3 c, vec4 f0, vec4 f1, vec4 f2, vec4 f3, vec4 f4, vec4 f5, v
 
 // Tone curves, packed by packCurves in src/edit-stack/curves.ts: curves[0].x = 1 when any curve
 // is set, then curves[1 + k] holds the rgb, red, green and blue curves (x, y, z, w) at input
-// k / 32. In between, the samples are blended linearly.
-// Mirrors applyCurves in android/.../Shaders.kt.
-float curveAt(constant float4 *curves, float x, int channel) {
-  float pos = clamp(x, 0.0, 1.0) * 32.0;
-  int i = min(int(pos), 31);
-  return mix(curves[1 + i][channel], curves[2 + i][channel], pos - float(i));
-}
-
+// k / 32. In between, the samples are blended linearly: each sample k gets the weight
+// max(0, 1 - |32 x - k|). Looping over every sample keeps the index the same for every pixel;
+// see applyCurves in android/.../Shaders.kt for why. Mirrors that function.
 float3 applyCurves(float3 c, constant float4 *curves) {
-  c = float3(curveAt(curves, c.r, 0), curveAt(curves, c.g, 0), curveAt(curves, c.b, 0));
-  return float3(curveAt(curves, c.r, 1), curveAt(curves, c.g, 2), curveAt(curves, c.b, 3));
+  float3 pos = clamp(c, 0.0, 1.0) * 32.0;
+  float3 rgb = float3(0.0);
+  for (int k = 0; k <= 32; k++) {
+    rgb += max(1.0 - abs(pos - float(k)), float3(0.0)) * curves[1 + k].x;
+  }
+  pos = clamp(rgb, 0.0, 1.0) * 32.0;
+  float3 result = float3(0.0);
+  for (int k = 0; k <= 32; k++) {
+    result += max(1.0 - abs(pos - float(k)), float3(0.0)) * curves[1 + k].yzw;
+  }
+  return result;
 }
 
 // Bilinear read done in the shader instead of by the GPU's sampler. Every GPU blends with its own
