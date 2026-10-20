@@ -73,6 +73,13 @@ export class PhotoEditorController {
     this.apply(withFilter(this.draft, filter));
   }
 
+  /** Changes the strength of the current filter, 0..1. Does nothing without a filter. */
+  setFilterIntensity(intensity: number): void {
+    const filter = this.draft.filter;
+    if (!filter) return;
+    this.apply(withFilter(this.draft, { ...filter, intensity: Math.min(1, Math.max(0, intensity)) }));
+  }
+
   /** Replaces the whole stack as one undo step. */
   setEdits(next: EditStack): void {
     this.apply(next);

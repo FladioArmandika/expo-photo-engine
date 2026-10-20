@@ -48,3 +48,17 @@ export type ExportResult = {
   totalMs: number;
   renderMs: number;
 };
+
+export type Thumbnail = {
+  /** file:// URI of a JPEG in the app's cache directory. */
+  uri: string;
+  width: number;
+  height: number;
+};
+
+export type ThumbnailOptions = {
+  /** Longest side of each thumbnail in px. Default 200. */
+  maxDimension?: number;
+  /** JPEG quality, 0..1. Default 0.8. */
+  quality?: number;
+};
