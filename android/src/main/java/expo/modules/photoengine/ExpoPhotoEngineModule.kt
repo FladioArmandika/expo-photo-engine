@@ -14,10 +14,23 @@ class CropRecord : Record {
   @Field val flipV: Boolean = false
 }
 
+/** `uniforms` is filled in by toNativeEdits in src/filters/registry.ts; the id is only for JS. */
+class FilterRecord : Record {
+  @Field val id: String = ""
+  @Field val intensity: Double = 0.0
+  @Field val uniforms: List<Double> = emptyList()
+}
+
 class EditStackRecord : Record {
   @Field val version: Int = 1
   @Field val crop: CropRecord? = null
   @Field val adjustments: Map<String, Double> = emptyMap()
+  @Field val filter: FilterRecord? = null
+}
+
+class ThumbnailOptionsRecord : Record {
+  @Field val maxDimension: Int = 200
+  @Field val quality: Double = 0.8
 }
 
 class ExportOptionsRecord : Record {
@@ -26,7 +39,8 @@ class ExportOptionsRecord : Record {
   @Field val maxDimension: Int = 0
 }
 
-internal fun EditStackRecord.toShaderParams() = ShaderParams(adjustments, crop?.let(::CropGeometry) ?: CropGeometry())
+internal fun EditStackRecord.toShaderParams() =
+  ShaderParams(adjustments, crop?.let(::CropGeometry) ?: CropGeometry(), filter?.uniforms ?: emptyList())
 
 class ExpoPhotoEngineModule : Module() {
   override fun definition() = ModuleDefinition {
@@ -38,6 +52,13 @@ class ExpoPhotoEngineModule : Module() {
       PhotoExporter.export(
         context, source, edits.toShaderParams(),
         options.format, options.quality, options.maxDimension
+      )
+    }
+
+    AsyncFunction("renderThumbnailsAsync") { source: String, edits: List<EditStackRecord>, options: ThumbnailOptionsRecord ->
+      val context = appContext.reactContext ?: throw Exceptions.ReactContextLost()
+      PhotoExporter.thumbnails(
+        context, source, edits.map { it.toShaderParams() }, options.maxDimension, options.quality
       )
     }
 

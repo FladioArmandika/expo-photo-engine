@@ -3,6 +3,7 @@ import * as React from 'react';
 import type { NativeSyntheticEvent, StyleProp, ViewStyle } from 'react-native';
 
 import type { AdjustmentKey, EditStack } from './edit-stack/types';
+import { toNativeEdits, type NativeEditStack } from './filters/registry';
 import type { ErrorEvent, LoadEvent, PreviewQuality, RenderStats } from './types';
 
 export type PhotoCanvasRef = {
@@ -31,14 +32,14 @@ export type PhotoCanvasProps = {
 
 type NativeViewRef = {
   setAdjustment(key: string, value: number): Promise<void>;
-  setEdits(edits: EditStack): Promise<void>;
+  setEdits(edits: NativeEditStack): Promise<void>;
   beginInteraction(): Promise<void>;
   endInteraction(): Promise<void>;
 };
 
 type NativeProps = {
   source: string;
-  edits?: EditStack;
+  edits?: NativeEditStack;
   previewQuality?: PreviewQuality;
   style?: StyleProp<ViewStyle>;
   onLoad?: (event: NativeSyntheticEvent<LoadEvent>) => void;
@@ -49,8 +50,17 @@ type NativeProps = {
 
 const NativePhotoCanvas: React.ComponentType<NativeProps> = requireNativeView('ExpoPhotoEngine');
 
-export function PhotoCanvas({ ref, onLoad, onError, onRenderStats, ...rest }: PhotoCanvasProps) {
+export function PhotoCanvas({
+  ref,
+  edits,
+  onLoad,
+  onError,
+  onRenderStats,
+  ...rest
+}: PhotoCanvasProps) {
   const nativeRef = React.useRef<NativeViewRef>(null);
+  // The native side gets the filter as shader numbers rather than an id.
+  const nativeEdits = React.useMemo(() => edits && toNativeEdits(edits), [edits]);
 
   React.useImperativeHandle(
     ref,
@@ -61,7 +71,7 @@ export function PhotoCanvas({ ref, onLoad, onError, onRenderStats, ...rest }: Ph
         nativeRef.current?.setAdjustment(key, value);
       },
       setEdits: (edits) => {
-        nativeRef.current?.setEdits(edits);
+        nativeRef.current?.setEdits(toNativeEdits(edits));
       },
       beginInteraction: () => {
         nativeRef.current?.beginInteraction();
@@ -76,6 +86,7 @@ export function PhotoCanvas({ ref, onLoad, onError, onRenderStats, ...rest }: Ph
   return (
     <NativePhotoCanvas
       {...rest}
+      edits={nativeEdits}
       ref={nativeRef}
       onLoad={onLoad && ((e) => onLoad(e.nativeEvent))}
       onError={onError && ((e) => onError(e.nativeEvent))}

@@ -76,17 +76,25 @@ struct ShaderParams {
   /// p2.z: the output's width / height, filled in at draw time.
   static let outputAspectSlot = 10
 
+  /// Floats applyFilter reads: eight float4s, packed by src/filters/looks.ts.
+  static let filterCount = 32
+
   private(set) var values = [Float](repeating: 0, count: 12)
   var crop = CropGeometry()
+  /// All zeros (intensity 0) means no filter.
+  private(set) var filter = [Float](repeating: 0, count: filterCount)
 
   init() {}
 
-  init(adjustments: [String: Double], crop: CropRecord? = nil) {
-    for (key, value) in adjustments {
+  init(_ edits: EditStackRecord) {
+    for (key, value) in edits.adjustments {
       set(key, value)
     }
-    if let crop {
+    if let crop = edits.crop {
       self.crop = CropGeometry(crop)
+    }
+    if let uniforms = edits.filter?.uniforms, uniforms.count == Self.filterCount {
+      filter = uniforms.map { Float($0) }
     }
   }
 
@@ -98,10 +106,11 @@ struct ShaderParams {
     return true
   }
 
+  /// The fragment shader's params: applyAdjustments' p0, p1, p2, then applyFilter's f0...f7.
   func packed(outputAspect: Float) -> [SIMD4<Float>] {
-    var v = values
+    var v = values + filter
     v[Self.outputAspectSlot] = outputAspect
-    return stride(from: 0, to: 12, by: 4).map { SIMD4(v[$0], v[$0 + 1], v[$0 + 2], v[$0 + 3]) }
+    return stride(from: 0, to: v.count, by: 4).map { SIMD4(v[$0], v[$0 + 1], v[$0 + 2], v[$0 + 3]) }
   }
 }
 
@@ -278,20 +287,53 @@ final class PhotoRenderer: @unchecked Sendable {
     source: String, params: ShaderParams, format: String, quality: Double, maxDimension: Int
   ) throws -> [String: Any] {
     let start = CACurrentMediaTime()
+    let input = try decodeTexture(source: source, crops: [params.crop], maxDimension: maxDimension)
+    let renderStart = CACurrentMediaTime()
+    let image = try render(input: input, params: params)
+    let renderMs = (CACurrentMediaTime() - renderStart) * 1000
+    let fileURL = try write(image, format: format, quality: quality)
+    return [
+      "uri": fileURL.absoluteString,
+      "width": image.width,
+      "height": image.height,
+      "totalMs": (CACurrentMediaTime() - start) * 1000,
+      "renderMs": renderMs,
+    ]
+  }
+
+  /// Renders several edit stacks of one photo as small JPEGs, decoding the photo only once.
+  /// Used for filter thumbnails.
+  func thumbnails(
+    source: String, params: [ShaderParams], maxDimension: Int, quality: Double
+  ) throws -> [[String: Any]] {
+    guard !params.isEmpty else { return [] }
+    let input = try decodeTexture(source: source, crops: params.map(\.crop), maxDimension: maxDimension)
+    return try params.map { p in
+      let image = try render(input: input, params: p)
+      let fileURL = try write(image, format: "jpeg", quality: quality)
+      return ["uri": fileURL.absoluteString, "width": image.width, "height": image.height]
+    }
+  }
+
+  /// Decodes `source` just large enough that every crop in `crops` reaches `maxDimension`
+  /// (0 = full size), and uploads it.
+  private func decodeTexture(source: String, crops: [CropGeometry], maxDimension: Int) throws -> MTLTexture {
     let url = try Self.url(for: source)
     let full = try Self.orientedSize(of: url)
     let fullLongest = max(full.width, full.height)
     var longest = fullLongest
     if maxDimension > 0 {
       // maxDimension limits the cropped output, so decode just large enough for the crop to reach it.
-      let fraction = params.crop.longestFraction(width: full.width, height: full.height)
+      let fraction = crops.map { $0.longestFraction(width: full.width, height: full.height) }.min() ?? 1
       let needed = (Float(maxDimension) / fraction).rounded(.up)
       longest = min(longest, Int(min(needed, Float(fullLongest))))
     }
     longest = min(longest, Self.maxTextureSize)
+    return try makeTexture(from: Self.decode(url: url, maxPixelSize: longest))
+  }
 
-    let image = try Self.decode(url: url, maxPixelSize: longest)
-    let input = try makeTexture(from: image)
+  /// Draws `input` with `params` into an offscreen texture the size of the crop and reads it back.
+  private func render(input: MTLTexture, params: ShaderParams) throws -> CGImage {
     let (width, height) = params.crop.outputSize(width: input.width, height: input.height)
 
     let descriptor = MTLTextureDescriptor.texture2DDescriptor(
@@ -311,7 +353,6 @@ final class PhotoRenderer: @unchecked Sendable {
     guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
       throw PhotoEngineError.renderFailed("could not create encoder")
     }
-    let renderStart = CACurrentMediaTime()
     // Without straightening every output pixel lands on exactly one input pixel, so nearest
     // sampling copies it exactly. A straightened image falls between pixels and needs filtering.
     let sampler = params.crop.straighten == 0 ? nearestSampler : linearSampler
@@ -324,7 +365,6 @@ final class PhotoRenderer: @unchecked Sendable {
     if let error = commandBuffer.error {
       throw PhotoEngineError.renderFailed(error.localizedDescription)
     }
-    let renderMs = (CACurrentMediaTime() - renderStart) * 1000
 
     let bytesPerRow = width * 4
     var pixels = [UInt8](repeating: 0, count: bytesPerRow * height)
@@ -342,7 +382,11 @@ final class PhotoRenderer: @unchecked Sendable {
     else {
       throw PhotoEngineError.renderFailed("could not wrap output pixels")
     }
+    return cgImage
+  }
 
+  /// Writes `image` to a new file in the caches directory.
+  private func write(_ image: CGImage, format: String, quality: Double) throws -> URL {
     let isJpeg = format == "jpeg"
     let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("ExpoPhotoEngine", isDirectory: true)
@@ -353,17 +397,10 @@ final class PhotoRenderer: @unchecked Sendable {
       throw PhotoEngineError.renderFailed("could not create file")
     }
     let properties: [CFString: Any] = isJpeg ? [kCGImageDestinationLossyCompressionQuality: quality] : [:]
-    CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+    CGImageDestinationAddImage(destination, image, properties as CFDictionary)
     guard CGImageDestinationFinalize(destination) else {
       throw PhotoEngineError.renderFailed("could not write file")
     }
-
-    return [
-      "uri": fileURL.absoluteString,
-      "width": width,
-      "height": height,
-      "totalMs": (CACurrentMediaTime() - start) * 1000,
-      "renderMs": renderMs,
-    ]
+    return fileURL
   }
 }

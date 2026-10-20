@@ -5,6 +5,7 @@ import {
   exportImage,
   flipHorizontal,
   PhotoCanvas,
+  renderFilterThumbnails,
   rotateRight,
   usePhotoEditor,
   withCrop,
@@ -12,6 +13,7 @@ import {
   type AdjustmentKey,
   type EditStack,
   type ExportResult,
+  type FilterThumbnail,
   type LoadEvent,
   type PreviewQuality,
   type RenderStats,
@@ -22,14 +24,14 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Sharing from 'expo-sharing';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 // Test screen: every adjustment rendered by the native shader. usePhotoEditor sends slider ticks
 // straight to the canvas, so dragging never causes a React render, and makes each drag one undo step.
 export default function App() {
   const editor = usePhotoEditor();
-  // One slider at a time: an adjustment, or the straighten angle.
-  const [active, setActive] = useState<AdjustmentKey | 'straighten'>('exposure');
+  // One control at a time: an adjustment, the straighten angle, or the filter picker.
+  const [active, setActive] = useState<AdjustmentKey | 'straighten' | 'filters'>('exposure');
   const [source, setSource] = useState<string | null>(null);
   const [quality, setQuality] = useState<PreviewQuality>('auto');
   const [load, setLoad] = useState<LoadEvent | null>(null);
@@ -37,10 +39,29 @@ export default function App() {
   const [sweeping, setSweeping] = useState(false);
   const [exported, setExported] = useState<ExportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [thumbnails, setThumbnails] = useState<FilterThumbnail[]>([]);
+
+  // Filter thumbnails show the photo as currently cropped and adjusted, so re-render them when
+  // either changes. Picking a filter doesn't change them.
+  const { crop, adjustments } = editor.edits;
+  const thumbnailKey = JSON.stringify([source, crop, adjustments]);
+  useEffect(() => {
+    if (!source || active !== 'filters') return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      renderFilterThumbnails(source, editor.getEdits(), { maxDimension: 160 })
+        .then((result) => !cancelled && setThumbnails(result))
+        .catch((e) => setError(String(e)));
+    }, 150);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [thumbnailKey, active]);
 
   // Auto-sweep the selected adjustment every frame from JS (the "stress test" input), no hands needed.
   useEffect(() => {
-    if (!sweeping) return;
+    if (!sweeping || active === 'filters') return;
     const { controller } = editor;
     controller.beginGesture();
     const { min, max } = active === 'straighten' ? { min: -20, max: 20 } : ADJUSTMENTS[active];
@@ -155,8 +176,38 @@ export default function App() {
           onPress={() => setActive('straighten')}>
           <Text style={styles.chipText}>Straighten</Text>
         </Pressable>
+        <Pressable
+          style={[styles.chip, active === 'filters' && styles.chipActive]}
+          onPress={() => setActive('filters')}>
+          <Text style={styles.chipText}>Filters</Text>
+        </Pressable>
       </ScrollView>
-      {active === 'straighten' ? (
+      {active === 'filters' ? (
+        <>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.thumbnails}>
+            {thumbnails.map((t) => {
+              const selected = (editor.edits.filter?.id ?? null) === t.id;
+              return (
+                <Pressable
+                  key={t.id ?? 'original'}
+                  onPress={() =>
+                    editor.setFilter(t.id === null ? null : { id: t.id, intensity: 1 })
+                  }>
+                  <Image
+                    source={{ uri: t.uri }}
+                    style={[styles.thumbnail, selected && styles.thumbnailSelected]}
+                  />
+                  <Text style={styles.thumbnailLabel}>{t.label}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          {editor.edits.filter && <Slider style={styles.slider} {...editor.filterSliderProps()} />}
+        </>
+      ) : active === 'straighten' ? (
         <Slider
           style={styles.slider}
           minimumValue={-45}
@@ -275,6 +326,10 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: '#3b3b42' },
   chipText: { color: '#eee', fontSize: 13 },
   slider: { width: '100%', height: 40 },
+  thumbnails: { gap: 8, paddingVertical: 6 },
+  thumbnail: { width: 64, height: 64, borderRadius: 6, borderWidth: 2, borderColor: 'transparent' },
+  thumbnailSelected: { borderColor: '#fff' },
+  thumbnailLabel: { color: '#ccc', fontSize: 11, textAlign: 'center', marginTop: 2 },
   button: {
     backgroundColor: '#2a2a2e',
     paddingVertical: 10,

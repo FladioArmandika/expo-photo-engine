@@ -108,7 +108,7 @@ final class PhotoCanvasView: ExpoView {
   }
 
   func setEdits(_ edits: EditStackRecord) {
-    params = ShaderParams(adjustments: edits.adjustments, crop: edits.crop)
+    params = ShaderParams(edits)
     markInput()
   }
 

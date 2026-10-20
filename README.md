@@ -19,9 +19,9 @@ The engine renders the live preview and the full-resolution export natively, on 
 same result on iOS and Android.
 
 > [!WARNING]
-> **Pre-alpha.** The ten adjustments and PNG/JPEG export work and are being benchmarked on
-> devices. Filters and the crop handles UI are not built yet. Everything marked _planned_ below is the v1 target,
-> not shipped code. Don't use it in production yet.
+> **Pre-alpha.** Adjustments, crop, filters and PNG/JPEG export work and are being benchmarked
+> on devices. Everything marked _planned_ below is the v1 target, not shipped code. Don't use it
+> in production yet.
 
 ## Why
 
@@ -91,7 +91,7 @@ general-purpose 2D canvas.
 | Headless export (PNG, JPEG) | ✅ spike |
 | Crop, 90° rotation, straighten, flip | ✅ |
 | Optional `CropOverlay` with drag handles | planned |
-| LUT filters with intensity, filter catalog as data, live thumbnails | planned |
+| Filters with intensity, 11 built in, your own as data, live thumbnails | ✅ |
 | Edit stack: types, validation, migration, undo/redo history | ✅ |
 | `usePhotoEditor` hook: undo/redo, unsaved-changes flag, slider wiring | ✅ |
 | HEIC export, metadata (EXIF) preservation | planned |
@@ -167,7 +167,9 @@ const editor = usePhotoEditor({
 | `isDirty`, `markSaved()` | Unsaved changes since the start or the last `markSaved()`. |
 | `setAdjustment(key, value)` | Sets one value. Outside a gesture it is its own undo step. |
 | `beginGesture()`, `endGesture()` | Group everything in between into one undo step. Use these with your own slider or gesture code. |
+| `filterSliderProps()` | Slider props for the current filter's intensity. |
 | `setCrop(crop)`, `setFilter(filter)`, `setEdits(stack)` | One undo step each. |
+| `setFilterIntensity(value)` | 0 to 1. Does nothing when no filter is set. |
 | `update(change)` | Applies a function to the current edits, e.g. `update(rotateRight)`. One undo step, or part of the gesture in progress. |
 | `reset(stack?)` | Start over (default: the original photo) with an empty history. |
 
@@ -245,14 +247,54 @@ and flips. `rotateRight` and the flips move the rect along with the photo, so th
 selected. Straightening zooms in just enough that the crop never shows anything outside the
 photo. The preview, the export and its pixel size all follow the crop.
 
-`filter` (LUT id + intensity) is already part of the format and validated; rendering it is
-planned. Stacks always migrate forward, so a stack saved today keeps opening in later versions.
+#### Filters
+
+```ts
+import { BUILT_IN_FILTERS, renderFilterThumbnails, registerFilters } from '@fladioarmandika/expo-photo-engine';
+
+editor.setFilter({ id: 'film', intensity: 0.8 });
+
+// A picker strip: "Original" plus every filter, rendered on the photo as currently edited.
+const thumbs = await renderFilterThumbnails(source, editor.getEdits(), { maxDimension: 160 });
+// [{ id: null, label: 'Original', uri, width, height }, { id: 'vivid', label: 'Vivid', ... }, ...]
+```
+
+Built in: `vivid`, `golden`, `nordic`, `matte`, `film`, `teal-orange`, `chrome`, `dramatic`,
+`mono`, `noir`, `sepia`. The stack stores only the id and the intensity.
+
+A filter is a small recipe, not an image file, so you can write your own:
+
+```ts
+registerFilters([
+  {
+    id: 'brand-warm',
+    label: 'Warm',
+    look: {
+      slope: [1.05, 1, 0.92],             // per-channel gain
+      offset: [0.02, 0.01, 0],            // lifts the blacks
+      contrast: 0.1,                      // -1..1
+      saturation: 1.1,                    // 1 = unchanged
+      highlightTint: [0.03, 0.01, -0.02], // color added to bright areas
+    },
+  },
+]);
+```
+
+The other fields are `power` (per-channel gamma), `shadowTint`, and `mixer` (a 3x3 channel mixer;
+three equal rows make black and white). Slope, offset and power are the ASC CDL formula colorists
+use. They run after the adjustments, in the same shader, so the preview stays one pass. A stack
+whose filter id isn't registered renders without a filter.
+
+`renderThumbnails(source, stacks, options)` is the general version: one small JPEG per stack, with
+the photo decoded once.
+
+Stacks always migrate forward, so a stack saved today keeps opening in later versions.
 
 ## How it works
 
 ```
-decode + EXIF orientation ─▶ proxy texture (sized to the view) ─▶ crop ─▶ adjustments ─▶ LUT filter ─▶ screen
-                         └─▶ full-resolution texture ───────────────────── same shaders ──────────────▶ file
+decode + EXIF orientation ─▶ proxy texture (sized to the view) ─▶ crop ─▶ adjustments ─▶ filter ─▶ screen
+                         └─▶ full-resolution texture ───────────────────── same shaders ──────────▶ file
 ```
 
 - **iOS:** ImageIO decodes straight to preview size; a Metal render pipeline draws into a
@@ -267,7 +309,7 @@ decode + EXIF orientation ─▶ proxy texture (sized to the view) ─▶ crop �
   output to photo, computed by a second shared block of shader code, so they cost nothing per
   pixel and never resample the image twice.
 - **Order:** sharpness, then exposure, white balance and vignette in linear light, then
-  highlights/shadows, contrast, saturation and vibrance on the sRGB values.
+  highlights/shadows, contrast, saturation and vibrance on the sRGB values, then the filter.
 - **Never blocks JS:** slider updates only store a value and mark the frame dirty; the native side
   draws at most once per display refresh.
 
@@ -292,10 +334,9 @@ node scripts/compare-images.mjs ios.png android.png diff.png
 
 ## Roadmap
 
-**v1:** `CropOverlay`, LUT filters with
-thumbnails, HEIC export and metadata, golden-image tests in CI.
+**v1:** `CropOverlay`, HEIC export and metadata, golden-image tests in CI.
 
-**Later:** drawing, text, stickers, custom LUT import, masks and local adjustments, RAW, web.
+**Later:** drawing, text, stickers, `.cube` LUT import, masks and local adjustments, RAW, web.
 
 ## Development
 

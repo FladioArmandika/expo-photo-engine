@@ -10,6 +10,7 @@ internal class GlPhotoProgram {
   private val uVParams: Int
   private val uParams: Int
   private val uCrop: Int
+  private val uFilter: Int
   private val uImage: Int
   private val vertexArray: Int
 
@@ -29,6 +30,7 @@ internal class GlPhotoProgram {
     uVParams = GLES30.glGetUniformLocation(program, "uVParams")
     uParams = GLES30.glGetUniformLocation(program, "uParams")
     uCrop = GLES30.glGetUniformLocation(program, "uCrop")
+    uFilter = GLES30.glGetUniformLocation(program, "uFilter")
     uImage = GLES30.glGetUniformLocation(program, "uImage")
 
     // The quad comes from gl_VertexID, but some drivers still refuse to draw without a VAO bound.
@@ -64,6 +66,7 @@ internal class GlPhotoProgram {
     GLES30.glUniform4f(uVParams, scaleX, scaleY, if (flipY) 1f else 0f, textureWidth.toFloat() / textureHeight)
     GLES30.glUniform4fv(uCrop, 2, params.crop.packed, 0)
     GLES30.glUniform4fv(uParams, 3, params.packed(outputAspect = imageAspect), 0)
+    GLES30.glUniform4fv(uFilter, 8, params.filter, 0)
     GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
   }
 
@@ -164,20 +167,27 @@ internal class CropGeometry(
 internal class ShaderParams private constructor(
   private val values: FloatArray,
   val crop: CropGeometry,
+  /** applyFilter's f0..f7 (uFilter[8]), packed by src/filters/looks.ts. All zeros = no filter. */
+  val filter: FloatArray,
 ) {
-  constructor() : this(FloatArray(12), CropGeometry())
+  constructor() : this(FloatArray(12), CropGeometry(), FloatArray(FILTER_COUNT))
 
-  constructor(adjustments: Map<String, Double>, crop: CropGeometry = CropGeometry()) : this(
+  constructor(
+    adjustments: Map<String, Double>,
+    crop: CropGeometry = CropGeometry(),
+    filter: List<Double> = emptyList(),
+  ) : this(
     FloatArray(12).also { values ->
       for ((key, value) in adjustments) SLOTS[key]?.let { values[it] = value.toFloat() }
     },
     crop,
+    if (filter.size == FILTER_COUNT) FloatArray(FILTER_COUNT) { filter[it].toFloat() } else FloatArray(FILTER_COUNT),
   )
 
   /** Returns a copy with [key] changed, or null for a key the shader doesn't know. */
   fun with(key: String, value: Double): ShaderParams? {
     val slot = SLOTS[key] ?: return null
-    return ShaderParams(values.copyOf().also { it[slot] = value.toFloat() }, crop)
+    return ShaderParams(values.copyOf().also { it[slot] = value.toFloat() }, crop, filter)
   }
 
   /** The fragment shader's uParams[3], with the output's width / height filled in. */
@@ -191,5 +201,6 @@ internal class ShaderParams private constructor(
       "sharpness" to 8, "vignette" to 9,
     )
     private const val OUTPUT_ASPECT_SLOT = 10
+    private const val FILTER_COUNT = 32
   }
 }
