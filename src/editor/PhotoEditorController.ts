@@ -7,6 +7,8 @@ import type { AdjustmentKey, Crop, EditStack, FilterRef } from '../edit-stack/ty
 export type PhotoEditorState = HistoryState & {
   /** True while the crop is being edited: the canvas shows the whole photo. */
   cropping: boolean;
+  /** True while the canvas shows the photo before edits (see setComparing). */
+  comparing: boolean;
 };
 
 /**
@@ -26,13 +28,14 @@ export class PhotoEditorController {
   private draft: EditStack;
   private gestures = 0;
   private cropping = false;
+  private comparing = false;
   private state: PhotoEditorState;
   private listeners = new Set<() => void>();
 
   constructor(initial: EditStack = createEditStack(), historyLimit?: number) {
     this.history = new EditHistory(initial, historyLimit);
     this.draft = initial;
-    this.state = { ...this.history.getState(), cropping: false };
+    this.state = { ...this.history.getState(), cropping: false, comparing: false };
     this.history.subscribe(() => this.emit());
   }
 
@@ -73,7 +76,8 @@ export class PhotoEditorController {
   setAdjustment(key: AdjustmentKey, value: number): void {
     this.draft = withAdjustment(this.draft, key, value);
     // Send the clamped value, so the preview never shows something the stack can't store.
-    this.canvas?.setAdjustment(key, this.draft.adjustments[key] ?? 0);
+    // While comparing the canvas shows the original; it catches up when comparing ends.
+    if (!this.comparing) this.canvas?.setAdjustment(key, this.draft.adjustments[key] ?? 0);
     if (this.gestures === 0) this.history.commit(this.draft);
   }
 
@@ -88,9 +92,22 @@ export class PhotoEditorController {
     this.emit();
   }
 
+  /**
+   * Shows the photo before edits (on) or with them (off), for a hold-to-compare control.
+   * Only the look is dropped: adjustments and filter. The crop, rotation and straightening stay,
+   * so the two views line up and the difference is easy to see. The edits are unchanged.
+   */
+  setComparing(comparing: boolean): void {
+    if (comparing === this.comparing) return;
+    this.comparing = comparing;
+    this.canvas?.setEdits(this.view(this.draft));
+    this.emit();
+  }
+
   /** The stack as the canvas should show it. */
   view(stack: EditStack): EditStack {
-    return this.cropping ? cropEditingView(stack) : stack;
+    const shown = this.comparing ? { ...stack, adjustments: {}, filter: null } : stack;
+    return this.cropping ? cropEditingView(shown) : shown;
   }
 
   setCrop(crop: Crop | null): void {
@@ -156,7 +173,11 @@ export class PhotoEditorController {
   }
 
   private emit() {
-    this.state = { ...this.history.getState(), cropping: this.cropping };
+    this.state = {
+      ...this.history.getState(),
+      cropping: this.cropping,
+      comparing: this.comparing,
+    };
     for (const listener of this.listeners) listener();
   }
 }

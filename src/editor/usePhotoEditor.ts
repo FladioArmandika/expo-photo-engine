@@ -24,6 +24,13 @@ export type AdjustmentSliderProps = {
   onSlidingComplete: () => void;
 };
 
+/** Props for a Pressable (or anything with the same callbacks) that shows the original while held. */
+export type CompareProps = {
+  onLongPress: () => void;
+  onPressOut: () => void;
+  delayLongPress: number;
+};
+
 export type PhotoEditor = {
   /** Spread onto <PhotoCanvas>: `<PhotoCanvas source={uri} {...editor.canvasProps} />`. */
   canvasProps: { ref: (canvas: PhotoCanvasRef | null) => void; edits: EditStack };
@@ -50,6 +57,13 @@ export type PhotoEditor = {
   >;
   /** Slider props for the current filter's intensity, 0..1. */
   filterSliderProps: () => AdjustmentSliderProps;
+  /** True while the original is shown (see setComparing). */
+  comparing: boolean;
+  /**
+   * Hold-to-compare: spread onto a Pressable around the canvas, or onto a button. Holding shows
+   * the photo before edits until the finger lifts. A quick tap is ignored, so it doesn't flicker.
+   */
+  compareProps: CompareProps;
   /** The underlying controller: setAdjustment, setCrop, setFilter, undo, redo, reset, getEdits… */
   controller: PhotoEditorController;
 } & Pick<
@@ -58,6 +72,7 @@ export type PhotoEditor = {
   | 'setCrop'
   | 'setFilter'
   | 'setCropping'
+  | 'setComparing'
   | 'setFilterIntensity'
   | 'setEdits'
   | 'update'
@@ -119,11 +134,18 @@ export function usePhotoEditor(options: UsePhotoEditorOptions = {}): PhotoEditor
         onValueChange: (value) => c.setFilterIntensity(value),
         onSlidingComplete: () => c.endGesture(),
       }),
+      comparing: state.comparing,
+      compareProps: {
+        onLongPress: () => c.setComparing(true),
+        onPressOut: () => c.setComparing(false),
+        delayLongPress: 150,
+      },
       controller: c,
       setAdjustment: (key, value) => c.setAdjustment(key, value),
       setCrop: (crop) => c.setCrop(crop),
       setFilter: (filter) => c.setFilter(filter),
       setCropping: (cropping) => c.setCropping(cropping),
+      setComparing: (comparing) => c.setComparing(comparing),
       setFilterIntensity: (intensity) => c.setFilterIntensity(intensity),
       setEdits: (stack) => c.setEdits(stack),
       update: (change) => c.update(change),
