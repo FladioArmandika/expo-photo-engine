@@ -198,7 +198,6 @@ pixels are already upright, and color profile info is dropped because the output
 `result.metadata` says whether anything was written.
 
 HEIC needs a device with a HEVC encoder: iOS devices from the iPhone 7 on, and Android 9 or newer.
-On Android, HEIC files don't carry metadata yet (JPEG and PNG do).
 
 ### `EditStack`
 
