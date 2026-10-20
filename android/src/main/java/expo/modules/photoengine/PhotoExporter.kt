@@ -277,12 +277,7 @@ internal object PhotoExporter {
 
         GLES30.glViewport(0, 0, width, height)
         // flipY: glReadPixels returns the bottom row first, so render upside down to read top-down.
-        // nearest: without straightening every output pixel lands on exactly one input pixel, so
-        // nearest sampling copies it exactly. A straightened image falls between pixels and needs filtering.
-        program.draw(
-          input, textureWidth, textureHeight, width, height, params,
-          flipY = true, nearest = params.crop.straighten == 0f
-        )
+        program.draw(input, textureWidth, textureHeight, width, height, params, flipY = true)
         val pixels = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.nativeOrder())
         GLES30.glPixelStorei(GLES30.GL_PACK_ALIGNMENT, 1)
         GLES30.glReadPixels(0, 0, width, height, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, pixels)

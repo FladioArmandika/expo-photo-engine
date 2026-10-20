@@ -63,7 +63,7 @@ internal class GlPhotoProgram {
   fun draw(
     texture: Int, textureWidth: Int, textureHeight: Int,
     targetWidth: Int, targetHeight: Int,
-    params: ShaderParams, flipY: Boolean, nearest: Boolean
+    params: ShaderParams, flipY: Boolean
   ) {
     val output = params.crop.outputSize(textureWidth, textureHeight)
     val imageAspect = output.first.toFloat() / output.second
@@ -76,9 +76,6 @@ internal class GlPhotoProgram {
     GLES30.glBindVertexArray(vertexArray)
     GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
     GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texture)
-    val filter = if (nearest) GLES30.GL_NEAREST else GLES30.GL_LINEAR
-    GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, filter)
-    GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, filter)
     GLES30.glUniform1i(uImage, 0)
     GLES30.glUniform4f(uVParams, scaleX, scaleY, if (flipY) 1f else 0f, textureWidth.toFloat() / textureHeight)
     GLES30.glUniform4fv(uCrop, 2, params.crop.packed, 0)

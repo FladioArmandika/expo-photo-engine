@@ -368,10 +368,9 @@ on both (`example/golden/cases.ts`), and `scripts/golden-compare.mjs` fails the 
 differs by more than 2/255. The table is in the run's summary and the diff maps are uploaded as
 an artifact.
 
-Current result: every adjustment, filter and plain crop matches within 1/255. The one exception
-is a straightened crop. It falls between pixels, and each GPU blends neighbours with its own
-precision, so on hard black/white edges about 0.5% of pixels end up to 8/255 apart. Flat areas
-still match. The check allows that on edges only (at most 1% of pixels, never over 16/255).
+The shader blends neighbouring pixels itself instead of leaving that to the GPU, with the same
+rounding on both platforms. Without that, a straightened crop came out up to 8/255 apart on hard
+edges, because every GPU blends with its own precision.
 
 _Real-device results land here after the device runs. Same target: no channel more than 2/255 apart._
 
