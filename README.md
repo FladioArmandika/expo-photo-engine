@@ -89,6 +89,7 @@ general-purpose 2D canvas.
 | Render stats: fps, CPU/GPU frame time, input latency, preview size | ✅ spike |
 | Exposure, contrast, highlights, shadows, saturation, vibrance, warmth, tint, sharpness, vignette | ✅ |
 | HSL: hue, saturation and luminance for 8 color ranges | ✅ |
+| Tone curves (RGB, red, green, blue) and an optional `ToneCurveEditor` | ✅ |
 | Headless export (PNG, JPEG, HEIC) | ✅ |
 | Crop, 90° rotation, straighten, flip | ✅ |
 | Optional `CropOverlay` with drag handles and aspect lock | ✅ |
@@ -176,6 +177,7 @@ const editor = usePhotoEditor({
 | `beginGesture()`, `endGesture()` | Group everything in between into one undo step. Use these with your own slider or gesture code. |
 | `filterSliderProps()` | Slider props for the current filter's intensity. |
 | `hslSliderProps(color, channel)`, `setHsl(color, channel, value)` | One HSL value, -1 to 1. One drag = one undo step. |
+| `curveEditorProps(channel)`, `setCurve(channel, points)` | One tone curve. Spread the props onto `<ToneCurveEditor>`; one drag = one undo step. `null` removes the curve. |
 | `setCrop(crop)`, `setFilter(filter)`, `setEdits(stack)` | One undo step each. |
 | `setCropping(on)`, `cropping` | Crop editing mode: the canvas shows the whole photo so a `CropOverlay` can sit on top. |
 | `cropOverlayProps(photo)` | Spread onto `<CropOverlay>`, with `photo` = the `onLoad` event (or any `{ sourceWidth, sourceHeight }`). One drag = one undo step. |
@@ -274,6 +276,37 @@ The ranges blend into each other, so a color halfway between orange and yellow t
 setting and there are no hard edges. `HSL_COLORS` and `HSL_CHANNELS` list them for building a
 panel. `hsl` is left out of the stack when nothing is set, so stacks saved before HSL existed
 still load and compare equal.
+
+#### Tone curves
+
+One curve for all three channels (`rgb`) and one each for `red`, `green` and `blue`. A curve is a
+list of `[input, output]` points from 0 to 1, and the line between them is a smooth curve that
+never overshoots (monotone cubic). The `rgb` curve is applied first, then each color's own.
+
+```ts
+// Gentle S-curve: darker shadows, brighter highlights.
+stack = withCurve(stack, 'rgb', [[0, 0], [0.25, 0.2], [0.75, 0.82], [1, 1]]);
+// Faded blacks.
+stack = withCurve(stack, 'rgb', [[0, 0.1], [1, 1]]);
+// Warmer highlights.
+stack = withCurve(stack, 'blue', [[0, 0], [0.75, 0.7], [1, 0.95]]);
+```
+
+`ToneCurveEditor` is a ready-made editor drawn with plain views, so it needs no extra
+dependencies. Touch near a point to drag it, touch anywhere else to add one, and drag a point out
+of the box to remove it.
+
+```tsx
+<ToneCurveEditor
+  style={{ width: 200, height: 200 }}
+  color="#5aa9ff"
+  {...editor.curveEditorProps('blue')}
+/>
+```
+
+Curves are cleaned up when set: points are clamped to 0..1, sorted, merged when closer than 0.01
+apart, and limited to 16. A straight line from black to white is removed, and `curves` is left
+out of the stack when no curve is set, so older stacks still load and compare equal.
 
 #### Crop, rotate, straighten, flip
 
@@ -376,8 +409,8 @@ Stacks always migrate forward, so a stack saved today keeps opening in later ver
 ## How it works
 
 ```
-decode + EXIF orientation ─▶ proxy texture (sized to the view) ─▶ crop ─▶ adjustments ─▶ HSL ─▶ filter ─▶ screen
-                         └─▶ full-resolution texture ───────────────────── same shaders ─────────────────▶ file
+decode + EXIF orientation ─▶ proxy texture (sized to the view) ─▶ crop ─▶ adjustments ─▶ curves ─▶ HSL ─▶ filter ─▶ screen
+                         └─▶ full-resolution texture ───────────────────── same shaders ───────────────────────────▶ file
 ```
 
 - **iOS:** ImageIO decodes straight to preview size; a Metal render pipeline draws into a
@@ -392,8 +425,8 @@ decode + EXIF orientation ─▶ proxy texture (sized to the view) ─▶ crop �
   output to photo, computed by a second shared block of shader code, so they cost nothing per
   pixel and never resample the image twice.
 - **Order:** sharpness, then exposure, white balance and vignette in linear light, then
-  highlights/shadows, contrast, saturation and vibrance on the sRGB values, then HSL, then the
-  filter.
+  highlights/shadows, contrast, saturation and vibrance on the sRGB values, then the tone curves,
+  then HSL, then the filter.
 - **Never blocks JS:** slider updates only store a value and mark the frame dirty; the native side
   draws at most once per display refresh.
 

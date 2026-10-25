@@ -1,5 +1,6 @@
 import type { PhotoCanvasRef } from '../PhotoCanvas';
 import { cropEditingView } from '../crop/geometry';
+import { withCurve, type CurveChannel, type CurvePoint } from '../edit-stack/curves';
 import { EditHistory, type HistoryState } from '../edit-stack/history';
 import { withHsl, type HslChannel, type HslColor } from '../edit-stack/hsl';
 import { createEditStack, withAdjustment, withCrop, withFilter } from '../edit-stack/operations';
@@ -128,6 +129,14 @@ export class PhotoEditorController {
    */
   setHsl(color: HslColor, channel: HslChannel, value: number): void {
     this.apply(withHsl(this.draft, color, channel, value));
+  }
+
+  /**
+   * Sets one tone curve; null or a straight line removes it. Like setAdjustment: inside a gesture
+   * it only updates the preview, outside one it is its own undo step.
+   */
+  setCurve(channel: CurveChannel, points: readonly CurvePoint[] | null): void {
+    this.apply(withCurve(this.draft, channel, points));
   }
 
   /** Changes the strength of the current filter, 0..1. Does nothing without a filter. */

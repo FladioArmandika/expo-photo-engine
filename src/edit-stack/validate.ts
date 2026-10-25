@@ -1,4 +1,11 @@
 import {
+  CURVE_CHANNELS,
+  normalizeCurve,
+  type CurveChannel,
+  type CurvePoint,
+  type ToneCurves,
+} from './curves';
+import {
   HSL_CHANNELS,
   HSL_COLORS,
   type HslAdjustments,
@@ -62,9 +69,10 @@ export function validateEditStack(input: unknown): ValidationResult {
   const crop = input.crop == null ? null : validateCrop(input.crop, errors, warnings);
   const filter = input.filter == null ? null : validateFilter(input.filter, errors, warnings);
   const hsl = input.hsl == null ? {} : validateHsl(input.hsl, errors, warnings);
+  const curves = input.curves == null ? {} : validateCurves(input.curves, errors, warnings);
 
   for (const key of Object.keys(input)) {
-    if (!['version', 'adjustments', 'crop', 'filter', 'hsl'].includes(key)) {
+    if (!['version', 'adjustments', 'crop', 'filter', 'hsl', 'curves'].includes(key)) {
       warnings.push(`dropped unknown field "${key}"`);
     }
   }
@@ -72,7 +80,36 @@ export function validateEditStack(input: unknown): ValidationResult {
   if (errors.length > 0) return { ok: false, errors };
   const value: EditStack = { version: 1, crop, adjustments, filter };
   if (Object.keys(hsl).length > 0) value.hsl = hsl;
+  if (Object.keys(curves).length > 0) value.curves = curves;
   return { ok: true, value, warnings };
+}
+
+function validateCurves(input: unknown, errors: string[], warnings: string[]): ToneCurves {
+  const result: ToneCurves = {};
+  if (!isRecord(input)) {
+    errors.push('curves must be an object');
+    return result;
+  }
+  for (const [channel, points] of Object.entries(input)) {
+    if (!(CURVE_CHANNELS as readonly string[]).includes(channel)) {
+      warnings.push(`dropped unknown curve "${channel}"`);
+      continue;
+    }
+    const valid =
+      Array.isArray(points) &&
+      points.length > 0 &&
+      points.every((p) => Array.isArray(p) && p.length === 2 && p.every(isFiniteNumber));
+    if (!valid) {
+      errors.push(`curves.${channel} must be a list of [input, output] number pairs`);
+      continue;
+    }
+    const normalized = normalizeCurve(points as CurvePoint[]);
+    if (normalized && JSON.stringify(normalized) !== JSON.stringify(points)) {
+      warnings.push(`curves.${channel} was cleaned up (clamped, sorted or merged points)`);
+    }
+    if (normalized) result[channel as CurveChannel] = normalized;
+  }
+  return result;
 }
 
 function validateHsl(input: unknown, errors: string[], warnings: string[]): HslAdjustments {

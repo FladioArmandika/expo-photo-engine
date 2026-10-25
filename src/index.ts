@@ -10,6 +10,7 @@ export * from './types';
 export * from './edit-stack';
 export * from './editor';
 export * from './crop';
+export * from './curves';
 export * from './filters';
 
 /**

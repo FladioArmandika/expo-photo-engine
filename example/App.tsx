@@ -1,6 +1,7 @@
 import {
   ADJUSTMENT_KEYS,
   ADJUSTMENTS,
+  CURVE_CHANNELS,
   CropOverlay,
   HSL_CHANNELS,
   HSL_COLORS,
@@ -9,11 +10,13 @@ import {
   PhotoCanvas,
   renderFilterThumbnails,
   rotateRight,
+  ToneCurveEditor,
   usePhotoEditor,
   withCropAspect,
   withStraighten,
   type AdjustmentKey,
   type CropAspect,
+  type CurveChannel,
   type ExportFormat,
   type ExportResult,
   type FilterThumbnail,
@@ -34,11 +37,13 @@ import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, View } from '
 // straight to the canvas, so dragging never causes a React render, and makes each drag one undo step.
 export default function App() {
   const editor = usePhotoEditor();
-  // One control at a time: an adjustment, the straighten angle, the HSL panel or the filter picker.
-  const [active, setActive] = useState<AdjustmentKey | 'straighten' | 'hsl' | 'filters'>(
+  // One control at a time: an adjustment, the straighten angle, the HSL panel, the curves or the
+  // filter picker.
+  const [active, setActive] = useState<AdjustmentKey | 'straighten' | 'hsl' | 'curves' | 'filters'>(
     'exposure'
   );
   const [hslColor, setHslColor] = useState<HslColor>('red');
+  const [curveChannel, setCurveChannel] = useState<CurveChannel>('rgb');
   const [source, setSource] = useState<string | null>(null);
   const [quality, setQuality] = useState<PreviewQuality>('auto');
   const [load, setLoad] = useState<LoadEvent | null>(null);
@@ -51,8 +56,8 @@ export default function App() {
 
   // Filter thumbnails show the photo as currently cropped and adjusted, so re-render them when
   // either changes. Picking a filter doesn't change them.
-  const { crop, adjustments, hsl } = editor.edits;
-  const thumbnailKey = JSON.stringify([source, crop, adjustments, hsl]);
+  const { crop, adjustments, hsl, curves } = editor.edits;
+  const thumbnailKey = JSON.stringify([source, crop, adjustments, hsl, curves]);
   useEffect(() => {
     if (!source || active !== 'filters') return;
     let cancelled = false;
@@ -69,7 +74,7 @@ export default function App() {
 
   // Auto-sweep the selected adjustment every frame from JS (the "stress test" input), no hands needed.
   useEffect(() => {
-    if (!sweeping || active === 'filters' || active === 'hsl') return;
+    if (!sweeping || active === 'filters' || active === 'hsl' || active === 'curves') return;
     const { controller } = editor;
     controller.beginGesture();
     const { min, max } = active === 'straighten' ? { min: -20, max: 20 } : ADJUSTMENTS[active];
@@ -208,6 +213,11 @@ export default function App() {
           <Text style={styles.chipText}>HSL</Text>
         </Pressable>
         <Pressable
+          style={[styles.chip, active === 'curves' && styles.chipActive]}
+          onPress={() => setActive('curves')}>
+          <Text style={styles.chipText}>Curves</Text>
+        </Pressable>
+        <Pressable
           style={[styles.chip, active === 'filters' && styles.chipActive]}
           onPress={() => setActive('filters')}>
           <Text style={styles.chipText}>Filters</Text>
@@ -265,6 +275,26 @@ export default function App() {
             </View>
           ))}
         </>
+      ) : active === 'curves' ? (
+        <View style={styles.curves}>
+          <ToneCurveEditor
+            key={curveChannel}
+            style={styles.curveEditor}
+            color={CURVE_COLORS[curveChannel]}
+            {...editor.curveEditorProps(curveChannel)}
+          />
+          <View style={styles.curveButtons}>
+            {CURVE_CHANNELS.map((channel) => (
+              <Button
+                key={channel}
+                title={channel === 'rgb' ? 'RGB' : channel[0]!.toUpperCase() + channel.slice(1)}
+                selected={channel === curveChannel}
+                onPress={() => setCurveChannel(channel)}
+              />
+            ))}
+            <Button title="Reset" onPress={() => editor.setCurve(curveChannel, null)} />
+          </View>
+        </View>
       ) : active === 'straighten' ? (
         <Slider
           style={styles.slider}
@@ -341,6 +371,13 @@ const SWATCHES: Record<HslColor, string> = {
   blue: '#1e88e5',
   purple: '#8e24aa',
   magenta: '#d81b60',
+};
+
+const CURVE_COLORS: Record<CurveChannel, string> = {
+  rgb: '#fff',
+  red: '#ff6b6b',
+  green: '#5fd38d',
+  blue: '#5aa9ff',
 };
 
 function Button({
@@ -424,6 +461,9 @@ const styles = StyleSheet.create({
   hslRow: { flexDirection: 'row', alignItems: 'center' },
   hslLabel: { color: '#ccc', width: 80, fontSize: 12 },
   hslSlider: { flex: 1, height: 32 },
+  curves: { flexDirection: 'row', gap: 12, paddingVertical: 6 },
+  curveEditor: { width: 150, height: 150, backgroundColor: '#1d1d20' },
+  curveButtons: { gap: 6 },
   thumbnails: { gap: 8, paddingVertical: 6 },
   thumbnail: { width: 64, height: 64, borderRadius: 6, borderWidth: 2, borderColor: 'transparent' },
   thumbnailSelected: { borderColor: '#fff' },
