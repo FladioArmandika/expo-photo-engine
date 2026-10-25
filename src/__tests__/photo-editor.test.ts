@@ -1,5 +1,5 @@
 import type { PhotoCanvasRef } from '../PhotoCanvas';
-import { createEditStack, rotateRight } from '../edit-stack';
+import { createCrop, createEditStack, rotateRight } from '../edit-stack';
 import { PhotoEditorController } from '../editor';
 
 function fakeCanvas() {
@@ -119,5 +119,51 @@ describe('PhotoEditorController.update', () => {
     expect(editor.getState().present.crop?.rotation).toBe(90);
     editor.undo();
     expect(editor.getState().present.crop).toBeNull();
+  });
+});
+
+describe('PhotoEditorController.setComparing', () => {
+  it('shows the photo without adjustments or filter, keeping the crop', () => {
+    const editor = new PhotoEditorController();
+    editor.setAdjustment('exposure', 0.5);
+    editor.setFilter({ id: 'film', intensity: 1 });
+    editor.update(rotateRight);
+    const shown: unknown[] = [];
+    editor.attachCanvas({ ...fakeCanvas().canvas, setEdits: (stack) => shown.push(stack) });
+
+    editor.setComparing(true);
+    expect(editor.getState().comparing).toBe(true);
+    expect(shown.at(-1)).toMatchObject({ adjustments: {}, filter: null, crop: { rotation: 90 } });
+
+    editor.setComparing(false);
+    expect(shown.at(-1)).toMatchObject({
+      adjustments: { exposure: 0.5 },
+      filter: { id: 'film' },
+    });
+    // Comparing is a view, not an edit.
+    expect(editor.getState().present).toBe(editor.getEdits());
+    expect(editor.getState().canUndo).toBe(true);
+  });
+
+  it('keeps showing the original if a value changes while comparing', () => {
+    const editor = new PhotoEditorController();
+    const { canvas, calls } = fakeCanvas();
+    editor.attachCanvas(canvas);
+    editor.setComparing(true);
+    editor.setAdjustment('contrast', 0.4);
+    expect(calls).toEqual(['edits {}']);
+    editor.setComparing(false);
+    expect(calls.at(-1)).toBe('edits {"contrast":0.4}');
+  });
+
+  it('combines with crop editing', () => {
+    const editor = new PhotoEditorController();
+    editor.setAdjustment('warmth', 0.3);
+    editor.setCrop(createCrop({ rect: [0.1, 0.1, 0.5, 0.5] }));
+    editor.setCropping(true);
+    editor.setComparing(true);
+    const view = editor.view(editor.getEdits());
+    expect(view.adjustments).toEqual({});
+    expect(view.crop?.rect).toEqual([0, 0, 1, 1]);
   });
 });

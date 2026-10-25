@@ -1,3 +1,4 @@
+import { insertCurvePoint, moveCurvePoint, removeCurvePoint } from '../curves/editing';
 import {
   CURVES_UNIFORM_COUNT,
   createEditStack,
@@ -12,7 +13,6 @@ import {
 } from '../edit-stack';
 import { PhotoEditorController } from '../editor';
 import { toNativeEdits } from '../filters';
-import { insertCurvePoint, moveCurvePoint, removeCurvePoint } from '../curves/editing';
 
 const sCurve: CurvePoint[] = [
   [0, 0],

@@ -146,15 +146,21 @@ export default function App() {
 
       <View style={styles.canvasWrap}>
         {source ? (
-          <PhotoCanvas
-            {...editor.canvasProps}
-            source={source}
-            previewQuality={quality}
-            style={StyleSheet.absoluteFill}
-            onLoad={setLoad}
-            onError={(e) => setError(e.message)}
-            onRenderStats={setStats}
-          />
+          // Hold the photo to see it without edits.
+          <Pressable
+            {...editor.compareProps}
+            disabled={editor.cropping}
+            style={StyleSheet.absoluteFill}>
+            <PhotoCanvas
+              {...editor.canvasProps}
+              source={source}
+              previewQuality={quality}
+              style={StyleSheet.absoluteFill}
+              onLoad={setLoad}
+              onError={(e) => setError(e.message)}
+              onRenderStats={setStats}
+            />
+          </Pressable>
         ) : (
           <Text style={styles.hint}>Pick a 24MP+ photo or use the parity chart.</Text>
         )}
@@ -164,6 +170,11 @@ export default function App() {
             // Same size as the canvas, so the box lines up with the photo.
             style={StyleSheet.absoluteFill}
           />
+        )}
+        {editor.comparing && (
+          <View style={styles.badge} pointerEvents="none">
+            <Text style={styles.badgeText}>Original</Text>
+          </View>
         )}
         <View style={styles.overlay} pointerEvents="none">
           <Text style={styles.overlayText}>
@@ -425,6 +436,16 @@ const styles = StyleSheet.create({
     fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
     fontSize: 12,
   },
+  badge: {
+    position: 'absolute',
+    right: 8,
+    top: 8,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 999,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
+  badgeText: { color: '#fff', fontSize: 12, fontWeight: '600' },
   chips: { gap: 6, paddingBottom: 4 },
   chip: {
     backgroundColor: '#1d1d20',

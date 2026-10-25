@@ -96,6 +96,7 @@ general-purpose 2D canvas.
 | Filters with intensity, 11 built in, your own as data, live thumbnails | ✅ |
 | Edit stack: types, validation, migration, undo/redo history | ✅ |
 | `usePhotoEditor` hook: undo/redo, unsaved-changes flag, slider wiring | ✅ |
+| Hold-to-compare with the original | ✅ |
 | Keeps the original's metadata (EXIF, GPS optional) in exports | ✅ |
 | Cross-platform golden-image tests in CI (iOS simulator vs Android emulator) | ✅ |
 
@@ -180,6 +181,8 @@ const editor = usePhotoEditor({
 | `setCrop(crop)`, `setFilter(filter)`, `setEdits(stack)` | One undo step each. |
 | `setCropping(on)`, `cropping` | Crop editing mode: the canvas shows the whole photo so a `CropOverlay` can sit on top. |
 | `cropOverlayProps(photo)` | Spread onto `<CropOverlay>`, with `photo` = the `onLoad` event (or any `{ sourceWidth, sourceHeight }`). One drag = one undo step. |
+| `compareProps`, `comparing` | Hold-to-compare. Spread onto a `Pressable` around the canvas (or a button): while held, the canvas shows the photo with only the crop applied. A quick tap is ignored, so it doesn't flicker. |
+| `setComparing(on)` | The same thing, for your own gesture code. The edits don't change. |
 | `setFilterIntensity(value)` | 0 to 1. Does nothing when no filter is set. |
 | `update(change)` | Applies a function to the current edits, e.g. `update(rotateRight)`. One undo step, or part of the gesture in progress. |
 | `reset(stack?)` | Start over (default: the original photo) with an empty history. |
@@ -346,6 +349,19 @@ shows the whole photo (rotated, flipped and straightened) and the box marks the 
 `withCropAspect` switches to `free`, `original` or any `w:h`; with a fixed aspect, corners keep
 the opposite corner in place and edges grow around the middle. When the photo is straightened,
 the final zoom is fitted to the chosen crop, so the result can show slightly more than the box.
+
+#### Before and after
+
+Hold the photo to see it without edits:
+
+```tsx
+<Pressable {...editor.compareProps} style={StyleSheet.absoluteFill}>
+  <PhotoCanvas source={uri} {...editor.canvasProps} style={StyleSheet.absoluteFill} />
+</Pressable>
+{editor.comparing && <Text>Original</Text>}
+```
+
+Only the look is hidden: everything except the crop. The crop stays, so the two views line up.
 
 #### Filters
 
