@@ -1,15 +1,18 @@
+import { isHslNeutral } from './hsl';
 import { serializeEditStack } from './migrate';
 import type { AdjustmentKey, Crop, EditStack, FilterRef } from './types';
 import { clampAdjustment } from './validate';
 
 /** An unedited photo. */
 export function createEditStack(init: Partial<Omit<EditStack, 'version'>> = {}): EditStack {
-  return {
+  const stack: EditStack = {
     version: 1,
     crop: init.crop ?? null,
     adjustments: { ...init.adjustments },
     filter: init.filter ?? null,
   };
+  if (!isHslNeutral(init.hsl)) stack.hsl = init.hsl;
+  return stack;
 }
 
 /** Returns a new stack with one adjustment set (clamped; 0 removes the key). */
@@ -113,7 +116,7 @@ export function isNeutral(stack: EditStack): boolean {
       c.rect[1] === 0 &&
       c.rect[2] === 1 &&
       c.rect[3] === 1);
-  return noAdjustments && noFilter && noCrop;
+  return noAdjustments && noFilter && noCrop && isHslNeutral(stack.hsl);
 }
 
 export function editStacksEqual(a: EditStack, b: EditStack): boolean {

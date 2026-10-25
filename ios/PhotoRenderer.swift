@@ -78,11 +78,15 @@ struct ShaderParams {
 
   /// Floats applyFilter reads: eight float4s, packed by src/filters/looks.ts.
   static let filterCount = 32
+  /// Floats applyHsl reads: seven float4s, packed by src/edit-stack/hsl.ts.
+  static let hslCount = 28
 
   private(set) var values = [Float](repeating: 0, count: 12)
   var crop = CropGeometry()
   /// All zeros (intensity 0) means no filter.
   private(set) var filter = [Float](repeating: 0, count: filterCount)
+  /// All zeros means no HSL change.
+  private(set) var hsl = [Float](repeating: 0, count: hslCount)
 
   init() {}
 
@@ -96,6 +100,9 @@ struct ShaderParams {
     if let uniforms = edits.filter?.uniforms, uniforms.count == Self.filterCount {
       filter = uniforms.map { Float($0) }
     }
+    if edits.hsl.count == Self.hslCount {
+      hsl = edits.hsl.map { Float($0) }
+    }
   }
 
   /// Returns false for a key the shader doesn't know.
@@ -106,9 +113,10 @@ struct ShaderParams {
     return true
   }
 
-  /// The fragment shader's params: applyAdjustments' p0, p1, p2, then applyFilter's f0...f7.
+  /// The fragment shader's params: applyAdjustments' p0, p1, p2, applyFilter's f0...f7, then
+  /// applyHsl's h0...h6.
   func packed(outputAspect: Float) -> [SIMD4<Float>] {
-    var v = values + filter
+    var v = values + filter + hsl
     v[Self.outputAspectSlot] = outputAspect
     return stride(from: 0, to: v.count, by: 4).map { SIMD4(v[$0], v[$0 + 1], v[$0 + 2], v[$0 + 3]) }
   }

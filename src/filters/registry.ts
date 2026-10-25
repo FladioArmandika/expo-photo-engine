@@ -1,6 +1,7 @@
 import { BUILT_IN_FILTERS } from './catalog';
 import { LOOK_UNIFORM_COUNT, packLook } from './looks';
 import type { FilterDefinition } from './types';
+import { packHsl } from '../edit-stack/hsl';
 import type { EditStack, FilterRef } from '../edit-stack/types';
 
 const filters = new Map<string, FilterDefinition>(BUILT_IN_FILTERS.map((f) => [f.id, f]));
@@ -24,19 +25,24 @@ export function registerFilters(definitions: FilterDefinition[]): void {
   }
 }
 
-/** The edit stack as the native side reads it: the filter id resolved to shader numbers. */
-export type NativeEditStack = Omit<EditStack, 'filter'> & {
+/**
+ * The edit stack as the native side reads it: the filter id resolved to shader numbers, and HSL
+ * packed into the numbers applyHsl reads.
+ */
+export type NativeEditStack = Omit<EditStack, 'filter' | 'hsl'> & {
   filter: (FilterRef & { uniforms: number[] }) | null;
+  hsl: number[];
 };
 
 export function toNativeEdits(stack: EditStack): NativeEditStack {
+  const hsl = packHsl(stack.hsl);
   const definition = stack.filter && getFilter(stack.filter.id);
   if (!stack.filter || !definition || stack.filter.intensity <= 0) {
-    return { ...stack, filter: null };
+    return { ...stack, filter: null, hsl };
   }
   const uniforms = packLook(definition.look, stack.filter.intensity);
   if (uniforms.length !== LOOK_UNIFORM_COUNT || !uniforms.every(Number.isFinite)) {
     throw new Error(`Filter "${definition.id}" has an invalid look`);
   }
-  return { ...stack, filter: { ...stack.filter, uniforms } };
+  return { ...stack, filter: { ...stack.filter, uniforms }, hsl };
 }

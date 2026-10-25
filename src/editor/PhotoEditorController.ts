@@ -1,6 +1,7 @@
 import type { PhotoCanvasRef } from '../PhotoCanvas';
 import { cropEditingView } from '../crop/geometry';
 import { EditHistory, type HistoryState } from '../edit-stack/history';
+import { withHsl, type HslChannel, type HslColor } from '../edit-stack/hsl';
 import { createEditStack, withAdjustment, withCrop, withFilter } from '../edit-stack/operations';
 import type { AdjustmentKey, Crop, EditStack, FilterRef } from '../edit-stack/types';
 
@@ -119,6 +120,14 @@ export class PhotoEditorController {
 
   setFilter(filter: FilterRef | null): void {
     this.apply(withFilter(this.draft, filter));
+  }
+
+  /**
+   * Sets one HSL value, -1..1. Like setAdjustment: inside a gesture it only updates the preview,
+   * outside one it is its own undo step.
+   */
+  setHsl(color: HslColor, channel: HslChannel, value: number): void {
+    this.apply(withHsl(this.draft, color, channel, value));
   }
 
   /** Changes the strength of the current filter, 0..1. Does nothing without a filter. */

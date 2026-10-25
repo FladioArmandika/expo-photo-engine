@@ -2,6 +2,8 @@ import {
   ADJUSTMENT_KEYS,
   ADJUSTMENTS,
   CropOverlay,
+  HSL_CHANNELS,
+  HSL_COLORS,
   exportImage,
   flipHorizontal,
   PhotoCanvas,
@@ -15,6 +17,7 @@ import {
   type ExportFormat,
   type ExportResult,
   type FilterThumbnail,
+  type HslColor,
   type LoadEvent,
   type PreviewQuality,
   type RenderStats,
@@ -31,8 +34,11 @@ import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, View } from '
 // straight to the canvas, so dragging never causes a React render, and makes each drag one undo step.
 export default function App() {
   const editor = usePhotoEditor();
-  // One control at a time: an adjustment, the straighten angle, or the filter picker.
-  const [active, setActive] = useState<AdjustmentKey | 'straighten' | 'filters'>('exposure');
+  // One control at a time: an adjustment, the straighten angle, the HSL panel or the filter picker.
+  const [active, setActive] = useState<AdjustmentKey | 'straighten' | 'hsl' | 'filters'>(
+    'exposure'
+  );
+  const [hslColor, setHslColor] = useState<HslColor>('red');
   const [source, setSource] = useState<string | null>(null);
   const [quality, setQuality] = useState<PreviewQuality>('auto');
   const [load, setLoad] = useState<LoadEvent | null>(null);
@@ -45,8 +51,8 @@ export default function App() {
 
   // Filter thumbnails show the photo as currently cropped and adjusted, so re-render them when
   // either changes. Picking a filter doesn't change them.
-  const { crop, adjustments } = editor.edits;
-  const thumbnailKey = JSON.stringify([source, crop, adjustments]);
+  const { crop, adjustments, hsl } = editor.edits;
+  const thumbnailKey = JSON.stringify([source, crop, adjustments, hsl]);
   useEffect(() => {
     if (!source || active !== 'filters') return;
     let cancelled = false;
@@ -63,7 +69,7 @@ export default function App() {
 
   // Auto-sweep the selected adjustment every frame from JS (the "stress test" input), no hands needed.
   useEffect(() => {
-    if (!sweeping || active === 'filters') return;
+    if (!sweeping || active === 'filters' || active === 'hsl') return;
     const { controller } = editor;
     controller.beginGesture();
     const { min, max } = active === 'straighten' ? { min: -20, max: 20 } : ADJUSTMENTS[active];
@@ -197,6 +203,11 @@ export default function App() {
           <Text style={styles.chipText}>Straighten</Text>
         </Pressable>
         <Pressable
+          style={[styles.chip, active === 'hsl' && styles.chipActive]}
+          onPress={() => setActive('hsl')}>
+          <Text style={styles.chipText}>HSL</Text>
+        </Pressable>
+        <Pressable
           style={[styles.chip, active === 'filters' && styles.chipActive]}
           onPress={() => setActive('filters')}>
           <Text style={styles.chipText}>Filters</Text>
@@ -226,6 +237,33 @@ export default function App() {
             })}
           </ScrollView>
           {editor.edits.filter && <Slider style={styles.slider} {...editor.filterSliderProps()} />}
+        </>
+      ) : active === 'hsl' ? (
+        <>
+          <View style={styles.row}>
+            {HSL_COLORS.map((color) => (
+              <Pressable
+                key={color}
+                accessibilityLabel={color}
+                onPress={() => setHslColor(color)}
+                style={[
+                  styles.swatch,
+                  { backgroundColor: SWATCHES[color] },
+                  color === hslColor && styles.swatchSelected,
+                ]}
+              />
+            ))}
+          </View>
+          {HSL_CHANNELS.map((channel) => (
+            <View key={channel} style={styles.hslRow}>
+              <Text style={styles.hslLabel}>{channel}</Text>
+              <Slider
+                key={`${hslColor}-${channel}`}
+                style={styles.hslSlider}
+                {...editor.hslSliderProps(hslColor, channel)}
+              />
+            </View>
+          ))}
         </>
       ) : active === 'straighten' ? (
         <Slider
@@ -293,6 +331,17 @@ export default function App() {
 }
 
 const ASPECTS: CropAspect[] = ['free', 'original', '1:1', '4:5', '16:9'];
+
+const SWATCHES: Record<HslColor, string> = {
+  red: '#e53935',
+  orange: '#fb8c00',
+  yellow: '#fdd835',
+  green: '#43a047',
+  aqua: '#00acc1',
+  blue: '#1e88e5',
+  purple: '#8e24aa',
+  magenta: '#d81b60',
+};
 
 function Button({
   title,
@@ -370,6 +419,11 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: '#3b3b42' },
   chipText: { color: '#eee', fontSize: 13 },
   slider: { width: '100%', height: 40 },
+  swatch: { width: 28, height: 28, borderRadius: 14, borderWidth: 2, borderColor: 'transparent' },
+  swatchSelected: { borderColor: '#fff' },
+  hslRow: { flexDirection: 'row', alignItems: 'center' },
+  hslLabel: { color: '#ccc', width: 80, fontSize: 12 },
+  hslSlider: { flex: 1, height: 32 },
   thumbnails: { gap: 8, paddingVertical: 6 },
   thumbnail: { width: 64, height: 64, borderRadius: 6, borderWidth: 2, borderColor: 'transparent' },
   thumbnailSelected: { borderColor: '#fff' },

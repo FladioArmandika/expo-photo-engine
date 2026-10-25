@@ -20,6 +20,8 @@ struct EditStackRecord: Record {
   @Field var crop: CropRecord? = nil
   @Field var adjustments: [String: Double] = [:]
   @Field var filter: FilterRecord? = nil
+  /// Packed by packHsl in src/edit-stack/hsl.ts. Empty or all zeros = no HSL change.
+  @Field var hsl: [Double] = []
 }
 
 struct ThumbnailOptionsRecord: Record {
