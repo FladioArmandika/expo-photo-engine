@@ -40,6 +40,16 @@ if [ "$status" -ne 0 ]; then
   if [ "$platform" = android ]; then
     echo "---- logcat (errors)"
     adb logcat -d '*:E' | tail -80 || true
+  else
+    # Nothing in metro.log usually means the app died before asking for the bundle.
+    echo "---- app process"
+    xcrun simctl spawn "$device" launchctl list | grep -i "$package" || echo "not running"
+    echo "---- simulator log for the app (last 80 lines)"
+    xcrun simctl spawn "$device" log show --last 20m --style compact \
+      --predicate 'processImagePath CONTAINS ".app/" AND messageType >= 16' | tail -80 || true
+    echo "---- newest crash report"
+    report=$(ls -t ~/Library/Logs/DiagnosticReports/*.ips 2>/dev/null | head -1 || true)
+    [ -n "$report" ] && head -150 "$report" || echo "none"
   fi
 fi
 exit "$status"
