@@ -84,9 +84,9 @@ general-purpose 2D canvas.
 
 | Feature | Status |
 | --- | --- |
-| `PhotoCanvas` native view, Metal (iOS) / OpenGL ES 3 (Android) | ✅ spike |
-| Imperative updates coalesced to the display refresh (60/120Hz) | ✅ spike |
-| Render stats: fps, CPU/GPU frame time, input latency, preview size | ✅ spike |
+| `PhotoCanvas` native view, Metal (iOS) / OpenGL ES 3 (Android) | ✅ |
+| Imperative updates coalesced to the display refresh (60/120Hz) | ✅ |
+| Render stats: fps, CPU/GPU frame time, input latency, preview size | ✅ |
 | Exposure, contrast, highlights, shadows, saturation, vibrance, warmth, tint, sharpness, vignette | ✅ |
 | HSL: hue, saturation and luminance for 8 color ranges | ✅ |
 | Tone curves (RGB, red, green, blue) and an optional `ToneCurveEditor` | ✅ |
