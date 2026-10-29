@@ -9,7 +9,7 @@ import {
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { colors, mono } from './theme';
+import { colors } from './theme';
 
 /**
  * Numbers for checking speed: photo size, decode time, fps and latency. "Sweep" moves the selected
@@ -52,15 +52,15 @@ export function DevOverlay({
   const lines = [`${Platform.OS} ${Platform.Version}`];
   if (photo) {
     const mp = ((photo.sourceWidth * photo.sourceHeight) / 1e6).toFixed(1);
-    lines.push(`photo   ${photo.sourceWidth}×${photo.sourceHeight} (${mp}MP)`);
+    lines.push(`photo ${photo.sourceWidth}×${photo.sourceHeight} (${mp}MP)`);
     lines.push(
       `preview ${photo.previewWidth}×${photo.previewHeight}, ${photo.decodeMs.toFixed(0)}ms`
     );
   }
   if (stats) {
     const gpu = stats.gpuTimeMs >= 0 ? `  gpu ${stats.gpuTimeMs.toFixed(2)}ms` : '';
-    lines.push(`fps     ${stats.fps.toFixed(1)}`);
-    lines.push(`cpu     ${stats.frameTimeMs.toFixed(2)}ms${gpu}`);
+    lines.push(`fps ${stats.fps.toFixed(1)}`);
+    lines.push(`cpu ${stats.frameTimeMs.toFixed(2)}ms${gpu}`);
     lines.push(`latency ${stats.latencyMs.toFixed(1)}ms${stats.interacting ? ' (live)' : ''}`);
   }
 
@@ -94,14 +94,14 @@ function Toggle({ label, on, onPress }: { label: string; on: boolean; onPress: (
 const styles = StyleSheet.create({
   box: {
     position: 'absolute',
-    left: 12,
-    top: 12,
+    left: 24,
+    top: 24,
     backgroundColor: 'rgba(0,0,0,0.7)',
-    borderRadius: 10,
+    borderRadius: 6,
     padding: 10,
     gap: 8,
   },
-  text: { color: '#7cfc9a', fontFamily: mono, fontSize: 11, lineHeight: 15 },
+  text: { color: colors.text, fontSize: 11, lineHeight: 16, fontVariant: ['tabular-nums'] },
   row: { flexDirection: 'row', gap: 6 },
   toggle: {
     paddingVertical: 4,
@@ -109,7 +109,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     backgroundColor: 'rgba(255,255,255,0.12)',
   },
-  toggleOn: { backgroundColor: '#7cfc9a' },
+  toggleOn: { backgroundColor: colors.text },
   toggleText: { color: colors.text, fontSize: 11, fontWeight: '600' },
-  toggleTextOn: { color: '#000' },
+  toggleTextOn: { color: colors.chrome },
 });

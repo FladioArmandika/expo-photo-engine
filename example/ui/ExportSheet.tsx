@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PillButton, Segmented } from './controls';
+import { Segmented, TextButton } from './controls';
 import { colors } from './theme';
 
 type Size = 'full' | '4096' | '2048';
@@ -74,18 +74,14 @@ export function ExportSheet({
               {result.width} × {result.height} {format.toUpperCase()} in{' '}
               {(result.totalMs / 1000).toFixed(1)}s{result.metadata ? ', camera info kept' : ''}
             </Text>
-            <View style={styles.actions}>
-              <View style={styles.flex}>
-                <PillButton title="Done" onPress={close} />
-              </View>
-              <View style={styles.flex}>
-                <PillButton
-                  primary
-                  title="Share"
-                  icon="share-outline"
-                  onPress={() => Sharing.shareAsync(result.uri)}
-                />
-              </View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => Sharing.shareAsync(result.uri)}
+              style={({ pressed }) => [styles.button, pressed && styles.pressed]}>
+              <Text style={styles.buttonText}>Share</Text>
+            </Pressable>
+            <View style={styles.done}>
+              <TextButton title="Done" onPress={close} />
             </View>
           </>
         ) : (
@@ -116,7 +112,7 @@ export function ExportSheet({
               <Switch
                 value={location}
                 onValueChange={setLocation}
-                trackColor={{ true: colors.accent, false: colors.surfaceHigh }}
+                trackColor={{ true: colors.text, false: colors.raised }}
               />
             </View>
             {error && <Text style={styles.error}>{error}</Text>}
@@ -126,9 +122,9 @@ export function ExportSheet({
               onPress={run}
               style={({ pressed }) => [styles.button, pressed && styles.pressed]}>
               {busy ? (
-                <ActivityIndicator color={colors.onAccent} />
+                <ActivityIndicator color={colors.chrome} />
               ) : (
-                <Text style={styles.buttonText}>Export</Text>
+                <Text style={styles.buttonText}>Export photo</Text>
               )}
             </Pressable>
           </>
@@ -141,9 +137,9 @@ export function ExportSheet({
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
   sheet: {
-    backgroundColor: colors.panel,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    backgroundColor: colors.chrome,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
     paddingHorizontal: 20,
     paddingTop: 10,
   },
@@ -152,12 +148,12 @@ const styles = StyleSheet.create({
     width: 36,
     height: 5,
     borderRadius: 3,
-    backgroundColor: colors.surfaceHigh,
+    backgroundColor: colors.raised,
     marginBottom: 14,
   },
   title: { color: colors.text, fontSize: 20, fontWeight: '700', marginBottom: 8 },
-  summary: { color: colors.textDim, fontSize: 15, marginBottom: 20 },
-  label: { color: colors.textDim, fontSize: 13, marginTop: 14, marginBottom: 8 },
+  summary: { color: colors.dim, fontSize: 15, marginBottom: 4 },
+  label: { color: colors.dim, fontSize: 13, marginTop: 14, marginBottom: 8 },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -169,13 +165,12 @@ const styles = StyleSheet.create({
   button: {
     marginTop: 24,
     height: 50,
-    borderRadius: 14,
-    backgroundColor: colors.accent,
+    borderRadius: 10,
+    backgroundColor: colors.text,
     alignItems: 'center',
     justifyContent: 'center',
   },
   pressed: { opacity: 0.7 },
-  buttonText: { color: colors.onAccent, fontSize: 16, fontWeight: '700' },
-  actions: { flexDirection: 'row', gap: 10 },
-  flex: { flex: 1 },
+  buttonText: { color: colors.chrome, fontSize: 16, fontWeight: '700' },
+  done: { alignItems: 'center', marginTop: 8 },
 });

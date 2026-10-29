@@ -6,7 +6,9 @@ import {
 } from '@fladioarmandika/expo-photo-engine';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
-import { Chip, formatHundred, ValueSlider } from '../controls';
+import { Choices, Dial, formatHundred } from '../controls';
+
+const OPTIONS = ADJUSTMENT_KEYS.map((key) => ({ value: key, label: ADJUSTMENTS[key].label }));
 
 export function AdjustPanel({
   editor,
@@ -19,7 +21,7 @@ export function AdjustPanel({
 }) {
   return (
     <View style={styles.panel}>
-      <ValueSlider
+      <Dial
         key={active}
         label={ADJUSTMENTS[active].label}
         slider={editor.sliderProps(active)}
@@ -30,27 +32,24 @@ export function AdjustPanel({
         horizontal
         showsHorizontalScrollIndicator={false}
         style={styles.bleed}
-        contentContainerStyle={styles.chips}>
-        {ADJUSTMENT_KEYS.map((key) => (
-          <Chip
-            key={key}
-            label={ADJUSTMENTS[key].label}
-            selected={key === active}
-            marked={!!editor.edits.adjustments[key]}
-            onPress={() => onSelect(key)}
-          />
-        ))}
+        contentContainerStyle={styles.row}>
+        <Choices
+          options={OPTIONS}
+          value={active}
+          onChange={onSelect}
+          marked={(key) => !!editor.edits.adjustments[key]}
+        />
       </ScrollView>
     </View>
   );
 }
 
 function formatStops(value: number) {
-  return `${value > 0 ? '+' : ''}${value.toFixed(2)} EV`;
+  return `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
 }
 
 const styles = StyleSheet.create({
-  panel: { gap: 14 },
-  bleed: { marginHorizontal: -16 },
-  chips: { gap: 8, paddingHorizontal: 16 },
+  panel: { gap: 18 },
+  bleed: { marginHorizontal: -20, flexGrow: 0 },
+  row: { gap: 22, paddingHorizontal: 20 },
 });

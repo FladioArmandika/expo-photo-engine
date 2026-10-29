@@ -6,14 +6,14 @@ import {
 } from '@fladioarmandika/expo-photo-engine';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { PillButton, tick } from '../controls';
+import { TextButton, tick } from '../controls';
 import { colors } from '../theme';
 
 const CHANNELS: Record<CurveChannel, { label: string; color: string }> = {
-  rgb: { label: 'RGB', color: '#ffffff' },
-  red: { label: 'Red', color: '#ff6b6b' },
-  green: { label: 'Green', color: '#5fd38d' },
-  blue: { label: 'Blue', color: '#5aa9ff' },
+  rgb: { label: 'RGB', color: colors.text },
+  red: { label: 'Red', color: '#ef6a6a' },
+  green: { label: 'Green', color: '#62c47a' },
+  blue: { label: 'Blue', color: '#5f9cf0' },
 };
 
 export function CurvesPanel({
@@ -31,7 +31,7 @@ export function CurvesPanel({
         key={channel}
         style={styles.editor}
         color={CHANNELS[channel].color}
-        gridColor="rgba(255,255,255,0.12)"
+        gridColor="rgba(255,255,255,0.08)"
         {...editor.curveEditorProps(channel)}
       />
       <View style={styles.side}>
@@ -46,8 +46,13 @@ export function CurvesPanel({
                 tick();
                 onSelect(c);
               }}
-              style={[styles.channel, selected && styles.channelSelected]}>
-              <View style={[styles.dot, { backgroundColor: CHANNELS[c].color }]} />
+              style={styles.channel}>
+              <View
+                style={[
+                  styles.bar,
+                  { backgroundColor: selected ? CHANNELS[c].color : 'transparent' },
+                ]}
+              />
               <Text style={[styles.channelText, selected && styles.channelTextSelected]}>
                 {CHANNELS[c].label}
               </Text>
@@ -56,9 +61,8 @@ export function CurvesPanel({
           );
         })}
         <View style={styles.spacer} />
-        <PillButton
-          title="Reset"
-          icon="refresh"
+        <TextButton
+          title="Reset curve"
           disabled={!editor.edits.curves?.[channel]}
           onPress={() => editor.setCurve(channel, null)}
         />
@@ -68,26 +72,13 @@ export function CurvesPanel({
 }
 
 const styles = StyleSheet.create({
-  panel: { flexDirection: 'row', gap: 16 },
-  editor: {
-    width: 168,
-    height: 168,
-    borderRadius: 8,
-    backgroundColor: colors.surface,
-  },
-  side: { flex: 1, gap: 4 },
-  channel: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 7,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-  },
-  channelSelected: { backgroundColor: colors.surface },
-  dot: { width: 10, height: 10, borderRadius: 5 },
-  channelText: { color: colors.textDim, fontSize: 14, fontWeight: '500', flex: 1 },
-  channelTextSelected: { color: colors.text },
-  changed: { width: 5, height: 5, borderRadius: 3, backgroundColor: colors.accent },
+  panel: { flexDirection: 'row', gap: 18 },
+  editor: { width: 176, height: 176, backgroundColor: colors.surround },
+  side: { flex: 1, alignItems: 'flex-start' },
+  channel: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
+  bar: { width: 3, height: 16, borderRadius: 1.5 },
+  channelText: { color: colors.dim, fontSize: 15 },
+  channelTextSelected: { color: colors.text, fontWeight: '600' },
+  changed: { width: 4, height: 4, borderRadius: 2, backgroundColor: colors.dim },
   spacer: { flex: 1 },
 });

@@ -6,7 +6,7 @@ import {
 import { useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { tick, ValueSlider } from '../controls';
+import { Dial, tick } from '../controls';
 import { colors } from '../theme';
 
 const PLACEHOLDERS = Array.from({ length: 8 }, (_, i) => i);
@@ -39,18 +39,11 @@ export function FilterPanel({
     };
   }, [source, key]);
 
-  const selectedId = editor.edits.filter?.id ?? null;
+  const filter = editor.edits.filter;
+  const selectedId = filter?.id ?? null;
 
   return (
     <View style={styles.panel}>
-      <ValueSlider
-        key={selectedId ?? 'none'}
-        label="Strength"
-        slider={editor.filterSliderProps()}
-        disabled={!editor.edits.filter}
-        onReset={() => editor.setFilterIntensity(1)}
-        format={(v) => `${Math.round(v * 100)}`}
-      />
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -83,23 +76,25 @@ export function FilterPanel({
               );
             })}
       </ScrollView>
+      <Dial
+        key={selectedId ?? 'none'}
+        label={filter ? 'Strength' : 'Pick a filter to set its strength'}
+        slider={editor.filterSliderProps()}
+        disabled={!filter}
+        onReset={() => editor.setFilterIntensity(1)}
+        format={(v) => `${Math.round(v * 100)}`}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  panel: { gap: 12 },
-  bleed: { marginHorizontal: -16 },
-  row: { gap: 10, paddingHorizontal: 16 },
-  thumbnail: {
-    width: 68,
-    height: 68,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  placeholder: { backgroundColor: colors.surface },
-  thumbnailSelected: { borderColor: colors.accent },
-  label: { color: colors.textDim, fontSize: 12, textAlign: 'center', marginTop: 6 },
+  panel: { gap: 14 },
+  bleed: { marginHorizontal: -20, flexGrow: 0 },
+  row: { gap: 6, paddingHorizontal: 20 },
+  thumbnail: { width: 72, height: 72, borderRadius: 3 },
+  placeholder: { backgroundColor: colors.raised },
+  thumbnailSelected: { borderWidth: 2, borderColor: colors.text },
+  label: { color: colors.dim, fontSize: 12, marginTop: 6 },
   labelSelected: { color: colors.text, fontWeight: '600' },
 });

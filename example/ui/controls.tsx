@@ -1,9 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { AdjustmentSliderProps } from '@fladioarmandika/expo-photo-engine';
-import Slider from '@react-native-community/slider';
 import * as Haptics from 'expo-haptics';
-import { type ComponentProps, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { type ComponentProps, useEffect, useRef, useState } from 'react';
+import {
+  Animated,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type GestureResponderEvent,
+  type LayoutChangeEvent,
+} from 'react-native';
 
 import { colors } from './theme';
 
@@ -18,13 +25,11 @@ export function IconButton({
   label,
   onPress,
   disabled,
-  size = 22,
 }: {
   icon: IconName;
   label: string;
   onPress: () => void;
   disabled?: boolean;
-  size?: number;
 }) {
   return (
     <Pressable
@@ -34,66 +39,105 @@ export function IconButton({
       hitSlop={8}
       onPress={onPress}
       style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}>
-      <Ionicons name={icon} size={size} color={disabled ? colors.textFaint : colors.text} />
+      <Ionicons name={icon} size={22} color={disabled ? colors.faint : colors.text} />
     </Pressable>
   );
 }
 
-/** A small rounded button with an optional icon, for actions inside a panel. */
-export function PillButton({
+/** Plain text that acts as a button. */
+export function TextButton({
+  title,
+  onPress,
+  disabled,
+  strong,
+}: {
+  title: string;
+  onPress: () => void;
+  disabled?: boolean;
+  strong?: boolean;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={disabled}
+      hitSlop={10}
+      onPress={onPress}
+      style={({ pressed }) => pressed && styles.pressed}>
+      <Text
+        style={[
+          styles.textButton,
+          strong && styles.textButtonStrong,
+          disabled && styles.textButtonDisabled,
+        ]}>
+        {title}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** An icon over a short label, for one-shot actions like Rotate. */
+export function ActionButton({
   title,
   icon,
   onPress,
-  primary,
   disabled,
 }: {
   title: string;
-  icon?: IconName;
+  icon: IconName;
   onPress: () => void;
-  primary?: boolean;
   disabled?: boolean;
 }) {
-  const color = primary ? colors.onAccent : colors.text;
+  const color = disabled ? colors.faint : colors.text;
   return (
     <Pressable
       accessibilityRole="button"
       disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.pill,
-        primary && styles.pillPrimary,
-        (pressed || disabled) && styles.pressed,
-      ]}>
-      {icon && <Ionicons name={icon} size={16} color={color} />}
-      <Text style={[styles.pillText, { color }]}>{title}</Text>
+      style={({ pressed }) => [styles.action, pressed && styles.pressed]}>
+      <Ionicons name={icon} size={22} color={color} />
+      <Text style={[styles.actionText, { color }]}>{title}</Text>
     </Pressable>
   );
 }
 
-/** A selectable chip. `marked` adds a dot, used for "this one has been changed". */
-export function Chip({
-  label,
-  selected,
+/**
+ * A row of words to pick from, like the adjustment names. The picked one is white, the rest grey.
+ * `marked` puts a dot under the ones that have been changed.
+ */
+export function Choices<T extends string>({
+  options,
+  value,
+  onChange,
   marked,
-  onPress,
 }: {
-  label: string;
-  selected: boolean;
-  marked?: boolean;
-  onPress: () => void;
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+  marked?: (value: T) => boolean;
 }) {
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      onPress={() => {
-        tick();
-        onPress();
-      }}
-      style={[styles.chip, selected && styles.chipSelected]}>
-      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{label}</Text>
-      <View style={[styles.dot, marked && styles.dotVisible]} />
-    </Pressable>
+    <>
+      {options.map((o) => {
+        const selected = o.value === value;
+        return (
+          <Pressable
+            key={o.value}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            hitSlop={6}
+            onPress={() => {
+              tick();
+              onChange(o.value);
+            }}
+            style={styles.choice}>
+            <Text style={[styles.choiceText, selected && styles.choiceTextSelected]}>
+              {o.label}
+            </Text>
+            <View style={[styles.dot, marked?.(o.value) && styles.dotOn]} />
+          </Pressable>
+        );
+      })}
+    </>
   );
 }
 
@@ -130,62 +174,117 @@ export function Segmented<T extends string>({
   );
 }
 
+const TICKS = 60;
+const TICK_GAP = 9;
+const RULER = TICKS * TICK_GAP;
+
 /**
- * A labelled slider that shows its value. Only this component re-renders while dragging, so the
- * screen around it stays still. Tap the value to reset it.
+ * A ruler you drag sideways under a fixed marker, like the dials in camera apps. Takes the same
+ * props as a slider. The ruler moves with Animated and only the value text re-renders, so the
+ * screen around it stays still while dragging. Tap the value to reset it.
  */
-export function ValueSlider({
+export function Dial({
   label,
   slider,
   format = formatHundred,
   onReset,
-  tint,
   disabled,
 }: {
   label: string;
   slider: AdjustmentSliderProps;
   format?: (value: number) => string;
   onReset?: () => void;
-  /** Track color. Sliders that go both ways from 0 get a neutral track by default. */
-  tint?: string;
   disabled?: boolean;
 }) {
+  const { minimumValue: min, maximumValue: max, step } = slider;
+  const range = max - min;
+  const [width, setWidth] = useState(0);
   // The value while dragging. Once the drag is committed (or undone), the prop takes over again.
   const [drag, setDrag] = useState({ from: slider.value, value: slider.value });
   const live = drag.from === slider.value ? drag.value : slider.value;
-  const bipolar = slider.minimumValue < 0;
-  const fill = tint ?? (bipolar ? colors.surfaceHigh : colors.accent);
+
+  const [offset] = useState(() => new Animated.Value(0));
+  const toOffset = (value: number) => -((value - min) / range) * RULER;
+  useEffect(() => offset.setValue(toOffset(slider.value)), [slider.value, min, max]);
+
+  // Where the current drag started: finger x and the value under the marker at that moment.
+  const gesture = useRef({ x: 0, start: 0, last: 0 });
+
+  const handlers = {
+    onStartShouldSetResponder: () => !disabled,
+    onMoveShouldSetResponder: () => !disabled,
+    onResponderTerminationRequest: () => false,
+    onResponderGrant: (e: GestureResponderEvent) => {
+      gesture.current = { x: e.nativeEvent.pageX, start: slider.value, last: slider.value };
+      slider.onSlidingStart();
+    },
+    onResponderMove: (e: GestureResponderEvent) => {
+      const g = gesture.current;
+      const raw = g.start - ((e.nativeEvent.pageX - g.x) / RULER) * range;
+      const value = Math.min(max, Math.max(min, Math.round(raw / step) * step));
+      if (value === g.last) return;
+      // A click when passing through zero, so it's easy to land back on it.
+      if (Math.sign(value) !== Math.sign(g.last)) tick();
+      g.last = value;
+      offset.setValue(toOffset(value));
+      setDrag({ from: slider.value, value });
+      slider.onValueChange(value);
+    },
+    onResponderRelease: () => slider.onSlidingComplete(),
+    onResponderTerminate: () => slider.onSlidingComplete(),
+  };
+
+  const nudge = (direction: 1 | -1) => {
+    const value = Math.min(max, Math.max(min, live + direction * step * 5));
+    slider.onSlidingStart();
+    slider.onValueChange(value);
+    slider.onSlidingComplete();
+  };
+
+  const zero = min < 0 && max > 0 ? Math.round((-min / range) * TICKS) : -1;
   const changed = Math.abs(live) > 1e-4;
 
   return (
     <View style={disabled && styles.disabled}>
-      <View style={styles.sliderHeader}>
-        <Text style={styles.sliderLabel}>{label}</Text>
+      <View style={styles.dialHeader}>
+        <Text style={styles.dialLabel}>{label}</Text>
         <Pressable
           accessibilityLabel={`Reset ${label}`}
-          disabled={!onReset || !changed}
+          disabled={!onReset || !changed || disabled}
           hitSlop={10}
           onPress={() => {
             tick();
             onReset?.();
           }}>
-          <Text style={[styles.sliderValue, changed && styles.sliderValueChanged]}>
-            {format(live)}
-          </Text>
+          <Text style={[styles.dialValue, changed && styles.dialValueChanged]}>{format(live)}</Text>
         </Pressable>
       </View>
-      <Slider
-        {...slider}
-        disabled={disabled}
-        style={styles.slider}
-        onValueChange={(value) => {
-          setDrag({ from: slider.value, value });
-          slider.onValueChange(value);
-        }}
-        minimumTrackTintColor={fill}
-        maximumTrackTintColor={colors.surfaceHigh}
-        thumbTintColor="#fff"
-      />
+      <View
+        {...handlers}
+        accessible
+        accessibilityLabel={label}
+        accessibilityRole="adjustable"
+        accessibilityValue={{ text: format(live) }}
+        accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+        onAccessibilityAction={(e) => nudge(e.nativeEvent.actionName === 'increment' ? 1 : -1)}
+        onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}
+        style={styles.dial}>
+        <Animated.View
+          style={[styles.ruler, { left: width / 2, transform: [{ translateX: offset }] }]}>
+          {Array.from({ length: TICKS + 1 }, (_, i) => (
+            <View
+              key={i}
+              style={[
+                styles.tick,
+                { left: i * TICK_GAP },
+                i % 5 === 0 && styles.tickMajor,
+                i === zero && styles.tickZero,
+              ]}
+            />
+          ))}
+        </Animated.View>
+        <View style={[styles.marker, { left: width / 2 - 1 }]} />
+      </View>
     </View>
   );
 }
@@ -198,56 +297,58 @@ export function formatHundred(value: number) {
 
 const styles = StyleSheet.create({
   pressed: { opacity: 0.5 },
-  disabled: { opacity: 0.35 },
+  disabled: { opacity: 0.3 },
   iconButton: { padding: 8 },
-  pill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: colors.surface,
-    paddingVertical: 9,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-  },
-  pillPrimary: { backgroundColor: colors.accent },
-  pillText: { fontSize: 14, fontWeight: '600' },
-  chip: {
-    alignItems: 'center',
-    paddingTop: 8,
-    paddingBottom: 4,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    backgroundColor: colors.surface,
-  },
-  chipSelected: { backgroundColor: colors.text },
-  chipText: { color: colors.text, fontSize: 13, fontWeight: '500' },
-  chipTextSelected: { color: colors.onAccent },
-  dot: { width: 4, height: 4, borderRadius: 2, marginTop: 3, backgroundColor: 'transparent' },
-  dotVisible: { backgroundColor: colors.accent },
+  textButton: { color: colors.text, fontSize: 16, padding: 8 },
+  textButtonStrong: { fontWeight: '700' },
+  textButtonDisabled: { color: colors.faint },
+  action: { alignItems: 'center', gap: 4, minWidth: 64, paddingVertical: 4 },
+  actionText: { fontSize: 12 },
+  choice: { alignItems: 'center', paddingVertical: 4 },
+  choiceText: { color: colors.dim, fontSize: 15 },
+  choiceTextSelected: { color: colors.text, fontWeight: '600' },
+  dot: { width: 4, height: 4, borderRadius: 2, marginTop: 5 },
+  dotOn: { backgroundColor: colors.dim },
   segmented: {
     flexDirection: 'row',
-    backgroundColor: colors.surface,
-    borderRadius: 10,
+    backgroundColor: colors.raised,
+    borderRadius: 9,
     padding: 2,
   },
-  segment: { flex: 1, alignItems: 'center', paddingVertical: 7, borderRadius: 8 },
-  segmentSelected: { backgroundColor: colors.surfaceHigh },
-  segmentText: { color: colors.textDim, fontSize: 13, fontWeight: '600' },
-  segmentTextSelected: { color: colors.text },
-  sliderHeader: {
+  segment: { flex: 1, alignItems: 'center', paddingVertical: 7, borderRadius: 7 },
+  segmentSelected: { backgroundColor: colors.text },
+  segmentText: { color: colors.dim, fontSize: 14, fontWeight: '500' },
+  segmentTextSelected: { color: colors.chrome, fontWeight: '600' },
+  dialHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
-    paddingHorizontal: 4,
   },
-  sliderLabel: { color: colors.text, fontSize: 14, fontWeight: '500' },
-  sliderValue: {
-    color: colors.textDim,
-    fontSize: 14,
+  dialLabel: { color: colors.dim, fontSize: 13 },
+  dialValue: {
+    color: colors.dim,
+    fontSize: 22,
+    fontWeight: '300',
     fontVariant: ['tabular-nums'],
-    minWidth: 48,
-    textAlign: 'right',
   },
-  sliderValueChanged: { color: colors.accent },
-  slider: { width: '100%', height: 36 },
+  dialValueChanged: { color: colors.text },
+  dial: { height: 44, overflow: 'hidden', marginTop: 4 },
+  ruler: { position: 'absolute', top: 0, bottom: 0, width: RULER + 1 },
+  tick: {
+    position: 'absolute',
+    bottom: 10,
+    width: 1,
+    height: 10,
+    backgroundColor: colors.faint,
+  },
+  tickMajor: { height: 18, backgroundColor: colors.dim },
+  tickZero: { height: 26, backgroundColor: colors.text },
+  marker: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 2,
+    borderRadius: 1,
+    backgroundColor: colors.text,
+  },
 });

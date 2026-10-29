@@ -1,17 +1,12 @@
-import { Platform } from 'react-native';
-
+// Neutral greys only. The photo is the one thing on screen with color, and the area around it is
+// a mid grey rather than black, so exposure isn't judged against a black frame.
 export const colors = {
-  background: '#000',
-  panel: '#0f0f11',
-  surface: '#1c1c1f',
-  surfaceHigh: '#2c2c31',
-  border: '#26262a',
-  text: '#f2f2f3',
-  textDim: '#8e8e93',
-  textFaint: '#55555b',
-  accent: '#ffd60a',
-  onAccent: '#111',
-  danger: '#ff453a',
+  chrome: '#151515',
+  surround: '#262626',
+  line: '#2e2e2e',
+  raised: '#2a2a2a',
+  text: '#ededed',
+  dim: '#8a8a8a',
+  faint: '#4d4d4d',
+  danger: '#ff6b5e',
 };
-
-export const mono = Platform.select({ ios: 'Menlo', default: 'monospace' });

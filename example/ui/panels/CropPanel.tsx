@@ -8,9 +8,9 @@ import {
   type LoadEvent,
   type PhotoEditor,
 } from '@fladioarmandika/expo-photo-engine';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
-import { Chip, PillButton, ValueSlider } from '../controls';
+import { ActionButton, Choices, Dial } from '../controls';
 
 const ASPECTS: { value: CropAspect; label: string }[] = [
   { value: 'free', label: 'Free' },
@@ -22,11 +22,10 @@ const ASPECTS: { value: CropAspect; label: string }[] = [
 
 export function CropPanel({ editor, photo }: { editor: PhotoEditor; photo: LoadEvent | null }) {
   const crop = editor.edits.crop;
-  const aspect = crop?.aspect ?? 'free';
 
   return (
     <View style={styles.panel}>
-      <ValueSlider
+      <Dial
         label="Straighten"
         slider={{
           value: crop?.straighten ?? 0,
@@ -40,33 +39,24 @@ export function CropPanel({ editor, photo }: { editor: PhotoEditor; photo: LoadE
         format={(v) => `${v.toFixed(1)}°`}
         onReset={() => editor.update((s) => withStraighten(s, 0))}
       />
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.bleed}
-        contentContainerStyle={[styles.row, styles.inset]}>
-        {ASPECTS.map((a) => (
-          <Chip
-            key={a.value}
-            label={a.label}
-            selected={a.value === aspect}
-            onPress={() =>
-              photo &&
-              editor.update((s) =>
-                withCropAspect(s, a.value, photo.sourceWidth, photo.sourceHeight)
-              )
-            }
-          />
-        ))}
-      </ScrollView>
-      <View style={styles.row}>
-        <PillButton title="Rotate" icon="reload" onPress={() => editor.update(rotateRight)} />
-        <PillButton
+      <View style={styles.aspects}>
+        <Choices
+          options={ASPECTS}
+          value={crop?.aspect ?? 'free'}
+          onChange={(aspect) =>
+            photo &&
+            editor.update((s) => withCropAspect(s, aspect, photo.sourceWidth, photo.sourceHeight))
+          }
+        />
+      </View>
+      <View style={styles.actions}>
+        <ActionButton title="Rotate" icon="reload" onPress={() => editor.update(rotateRight)} />
+        <ActionButton
           title="Flip"
           icon="swap-horizontal"
           onPress={() => editor.update(flipHorizontal)}
         />
-        <PillButton
+        <ActionButton
           title="Reset"
           icon="refresh"
           disabled={!crop}
@@ -79,7 +69,6 @@ export function CropPanel({ editor, photo }: { editor: PhotoEditor; photo: LoadE
 
 const styles = StyleSheet.create({
   panel: { gap: 14 },
-  row: { flexDirection: 'row', gap: 8 },
-  bleed: { marginHorizontal: -16 },
-  inset: { paddingHorizontal: 16 },
+  aspects: { flexDirection: 'row', justifyContent: 'space-between' },
+  actions: { flexDirection: 'row', justifyContent: 'space-around' },
 });
