@@ -17,6 +17,10 @@ const editor = usePhotoEditor();
 
 That's a working editor. It runs at 60 fps on a 24.5MP photo on an iPhone.
 
+<img src="https://raw.githubusercontent.com/FladioArmandika/expo-photo-engine/main/docs/demo.gif" width="320" alt="The example app on an iPhone: dragging exposure and contrast, trying filters, holding the photo to see the original, and bending the tone curve">
+
+That's the [example app](example) on an iPhone.
+
 ## What can it do?
 
 **Make the sky darker.**
