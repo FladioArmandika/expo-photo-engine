@@ -1,6 +1,6 @@
 {
   "name": "@fladioarmandika/expo-photo-engine",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "A native photo-editing engine for Expo. Your UI, our GPU.",
   "main": "build/index.js",
   "types": "build/index.d.ts",
@@ -72,6 +72,7 @@
   "files": [
     "build",
     "src",
+    "!src/__tests__",
     "ios",
     "android/build.gradle",
     "android/src",
